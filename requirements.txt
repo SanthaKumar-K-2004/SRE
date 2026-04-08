@@ -3,7 +3,8 @@ uvicorn[standard]==0.29.0
 pydantic==2.7.0
 networkx==3.3
 faker==24.11.0
-openai==1.30.0
+openai>=2.7.2
+openenv>=0.1.13
 pytest==8.2.0
 pytest-cov==5.0.0
 hypothesis==6.103.0
