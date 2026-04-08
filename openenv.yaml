@@ -1,0 +1,60 @@
+name: sre-bench
+version: "1.0.0"
+description: Deterministic RL environment for SRE on-call incident response.
+
+tasks:
+  - id: task1
+    name: Alert Classification
+    difficulty: easy
+    max_steps: 1
+    expected_score_range: [0.75, 0.90]
+  - id: task2
+    name: Root Cause Analysis
+    difficulty: medium
+    max_steps: 8
+    expected_score_range: [0.40, 0.60]
+  - id: task3
+    name: Full Remediation
+    difficulty: hard
+    max_steps: 15
+    expected_score_range: [0.15, 0.30]
+
+action_space:
+  type: categorical
+  values:
+    - inspect_logs
+    - check_metrics
+    - check_service
+    - restart_service
+    - scale_up
+    - rollback_deploy
+    - verify_endpoint
+    - resolve
+    - check_topology
+    - acknowledge_alert
+
+observation_space:
+  type: structured
+  fields:
+    incident_id: string
+    alert_payload: object
+    service_topology: object
+    logs: array
+    metrics: object
+    action_history: array
+    step_number: integer
+    incident_resolved: boolean
+
+api:
+  health:
+    method: GET
+    path: /health
+  reset:
+    method: POST
+    path: /reset
+  step:
+    method: POST
+    path: /step
+  state:
+    method: GET
+    path: /state

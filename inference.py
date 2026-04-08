@@ -10,26 +10,24 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import re
 import sys
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import httpx
 
 
-# ─── Configuration ──────────────────────────────────────────────────────────────
-
-DEFAULT_API_URL = "http://localhost:7860"
-DEFAULT_MODEL = os.environ.get("HF_MODEL", "mistralai/Mistral-7B-Instruct-v0.3")
-HF_TOKEN = os.environ.get("HF_TOKEN", "")
+# Configuration
+BASE_API_URL = "http://localhost:7860"
+ENV_NAME = "sre-bench"
+DEFAULT_API_URL = os.environ.get("API_BASE_URL", os.environ.get("SRE_BENCH_API_URL", BASE_API_URL))
+DEFAULT_MODEL = os.environ.get("MODEL_NAME", os.environ.get("HF_MODEL", "mistralai/Mistral-7B-Instruct-v0.3"))
+HF_TOKEN = os.environ.get("HF_TOKEN", os.environ.get("HUGGINGFACEHUB_API_TOKEN", ""))
 MAX_RETRIES = 5
-RETRY_DELAYS = [1, 2, 4, 8, 16]  # Exponential backoff
+RETRY_DELAYS = [1, 2, 4, 8, 16]
 
-
-# ─── Prompts ────────────────────────────────────────────────────────────────────
 
 SYSTEM_PROMPT = """You are an expert Site Reliability Engineer (SRE) handling on-call incidents.
 You must analyze alerts, diagnose root causes, and execute remediation actions.
@@ -50,7 +48,7 @@ Rules:
 1. Always inspect_logs before restart_service
 2. Always apply remediation before verify_endpoint
 3. Always verify_endpoint before resolve
-4. Follow the order: acknowledge → diagnose → remediate → verify → resolve
+4. Follow the order: acknowledge -> diagnose -> remediate -> verify -> resolve
 
 Respond with your action in this exact format:
 [START]
@@ -65,6 +63,51 @@ severity: <P1|P2|P3|P4>
 primary_fault_service: <service_name>
 [END]
 """
+
+
+def _coerce_float(value: Any, fallback: float = 0.0) -> float:
+    """Safely convert value to float."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _sanitize_token(value: Any) -> str:
+    """Convert arbitrary values into single-token strings for structured logs."""
+    text = str(value).strip()
+    if not text or text.lower() in {"none", "null"}:
+        return "null"
+    return re.sub(r"\s+", "_", text)
+
+
+def _format_action_token(action_type: str, target_service: Optional[str]) -> str:
+    """Format action token for [STEP] output."""
+    action = _sanitize_token(action_type)
+    if target_service:
+        target = _sanitize_token(target_service).replace("'", "")
+        return f"{action}('{target}')"
+    return f"{action}()"
+
+
+def _extract_error_token(info: Dict[str, Any]) -> str:
+    """Return a compact error token for [STEP] output."""
+    if not isinstance(info, dict):
+        return "null"
+
+    if info.get("error"):
+        return _sanitize_token(info["error"])
+
+    action_result = info.get("action_result")
+    if isinstance(action_result, dict):
+        if action_result.get("status") == "precondition_failed":
+            value = action_result.get("error") or action_result.get("reason") or "precondition_failed"
+            return _sanitize_token(value)
+
+    if info.get("precondition_failed"):
+        return "precondition_failed"
+
+    return "null"
 
 
 def build_observation_prompt(observation: Dict[str, Any], task: str) -> str:
@@ -122,7 +165,7 @@ Determine the root cause. Choose your next diagnostic action to investigate.
         prompt += """
 ### Your Task (Full Remediation)
 Diagnose and remediate this incident. Choose your next action carefully.
-Follow the workflow: acknowledge → diagnose → remediate → verify → resolve.
+Follow the workflow: acknowledge -> diagnose -> remediate -> verify -> resolve.
 """
 
     return prompt
@@ -130,16 +173,14 @@ Follow the workflow: acknowledge → diagnose → remediate → verify → resol
 
 def parse_action_response(response_text: str) -> Dict[str, str]:
     """Parse the [START]...[END] format from LLM response."""
-    # Find content between [START] and [END]
     pattern = r"\[START\](.*?)\[END\]"
     match = re.search(pattern, response_text, re.DOTALL)
 
     if not match:
-        # Try to parse without markers
         return _fallback_parse(response_text)
 
     content = match.group(1).strip()
-    result = {}
+    result: Dict[str, str] = {}
 
     for line in content.split("\n"):
         line = line.strip()
@@ -152,7 +193,7 @@ def parse_action_response(response_text: str) -> Dict[str, str]:
 
 def _fallback_parse(text: str) -> Dict[str, str]:
     """Fallback parser when [START][END] markers are missing."""
-    result = {}
+    result: Dict[str, str] = {}
     for line in text.strip().split("\n"):
         line = line.strip().lstrip("- ")
         if ":" in line:
@@ -161,9 +202,6 @@ def _fallback_parse(text: str) -> Dict[str, str]:
             result[key] = value.strip()
 
     return result
-
-
-# ─── LLM Client ─────────────────────────────────────────────────────────────────
 
 
 class SREAgent:
@@ -180,10 +218,16 @@ class SREAgent:
         self.hf_token = hf_token
         self.client = httpx.Client(timeout=30.0)
         self._response_cache: Dict[str, str] = {}
+        self.verbose = True
+
+    def _log(self, message: str) -> None:
+        """Write optional human-readable logs to stderr."""
+        if self.verbose:
+            print(message, file=sys.stderr)
 
     def reset_episode(self, task: str, seed: Optional[int] = None) -> Dict[str, Any]:
         """Reset the environment for a new episode."""
-        payload = {"task": task}
+        payload: Dict[str, Any] = {"task": task}
         if seed is not None:
             payload["seed"] = seed
 
@@ -205,7 +249,6 @@ class SREAgent:
         if not self.hf_token:
             return self._rule_based_response(prompt)
 
-        # Cache check
         cache_key = prompt[:200]
         if cache_key in self._response_cache:
             return self._response_cache[cache_key]
@@ -215,12 +258,12 @@ class SREAgent:
                 response = self._call_hf_router(prompt)
                 self._response_cache[cache_key] = response
                 return response
-            except Exception as e:
+            except Exception as exc:
                 if attempt < MAX_RETRIES - 1:
-                    print(f"  ⚠️  LLM call failed (attempt {attempt + 1}): {e}")
+                    self._log(f"[WARN] LLM call failed (attempt {attempt + 1}): {exc}")
                     time.sleep(delay)
                 else:
-                    print(f"  ❌ LLM call failed after {MAX_RETRIES} attempts")
+                    self._log(f"[ERROR] LLM call failed after {MAX_RETRIES} attempts")
                     return self._rule_based_response(prompt)
 
         return self._rule_based_response(prompt)
@@ -244,42 +287,32 @@ class SREAgent:
                 max_tokens=300,
                 temperature=0.1,
             )
-
             return response.choices[0].message.content or ""
-
         except ImportError:
-            print("  ⚠️  openai package not installed. Using rule-based agent.")
+            self._log("[WARN] openai package not installed. Using rule-based agent.")
             return self._rule_based_response(prompt)
 
     def _rule_based_response(self, prompt: str) -> str:
-        """
-        Rule-based fallback agent for when LLM is unavailable.
-        Follows a sensible incident response workflow.
-        """
-        # Parse current state from prompt
-        actions_taken = []
+        """Rule-based fallback agent for when LLM is unavailable."""
+        actions_taken: List[str] = []
         if "Actions taken:" in prompt:
             actions_line = prompt.split("Actions taken:")[1].split("\n")[0].strip()
             if actions_line != "None":
                 actions_taken = [a.strip() for a in actions_line.split(",")]
 
-        # Extract service name
         service = "unknown"
         if "Service:" in prompt:
             service = prompt.split("Service:")[1].split("\n")[0].strip()
 
-        # Task 1: Classification
         if "Alert Classification" in prompt:
             return self._classify_incident(prompt, service)
 
-        # Task 2/3: Follow diagnosis → remediation workflow
         return self._next_action(actions_taken, prompt, service)
 
     def _classify_incident(self, prompt: str, service: str) -> str:
         """Rule-based incident classification."""
         prompt_lower = prompt.lower()
 
-        # Detect incident type from metrics and logs
         incident_type = "cpu_spike"
         severity = "P2"
 
@@ -302,7 +335,6 @@ class SREAgent:
         elif "config" in prompt_lower:
             incident_type = "config_error"
 
-        # Check severity from alert title
         if "[P1]" in prompt:
             severity = "P1"
         elif "[P3]" in prompt:
@@ -320,7 +352,6 @@ primary_fault_service: {service}
         """Determine the next action based on workflow state."""
         action_names = [a.split(":")[0] for a in actions_taken]
 
-        # Follow the optimal workflow
         if "acknowledge_alert" not in action_names:
             action = "acknowledge_alert"
         elif "inspect_logs" not in action_names:
@@ -330,7 +361,6 @@ primary_fault_service: {service}
         elif "check_service" not in action_names:
             action = "check_service"
         elif not any(a in action_names for a in ("restart_service", "scale_up", "rollback_deploy")):
-            # Choose remediation based on incident indicators
             if "deploy" in prompt.lower() or "config" in prompt.lower():
                 action = "rollback_deploy"
             elif "capacity" in prompt.lower() or "overload" in prompt.lower():
@@ -354,116 +384,77 @@ target_service: {service}
         verbose: bool = True,
     ) -> Dict[str, Any]:
         """Run a complete episode and return results."""
-        if verbose:
-            print(f"\n{'='*60}")
-            print(f"🚀 SRE-Bench Agent — Task: {task} | Seed: {seed}")
-            print(f"{'='*60}")
+        self.verbose = verbose
 
-        # Reset environment
         observation = self.reset_episode(task, seed)
-        if verbose:
-            alert = observation.get("alert_payload", {})
-            print(f"\n📋 Incident: {observation.get('incident_id')}")
-            print(f"   Alert: {alert.get('title')}")
-            print(f"   Service: {alert.get('service')}")
-            print(f"   Severity: {alert.get('severity')}")
+        print(f"[START] task={task} env={ENV_NAME} model={self.model}")
 
-        total_reward = 0.0
         step_num = 0
         done = False
-        final_info = {}
+        final_info: Dict[str, Any] = {}
+        step_rewards: List[float] = []
 
         while not done and step_num < 30:
-            # Build prompt and get response
             prompt = build_observation_prompt(observation, task)
             llm_response = self.get_llm_response(prompt)
-
-            # Parse action from response
             parsed = parse_action_response(llm_response)
 
             if task == "task1":
-                # Task 1: Submit classification as final step
-                if verbose:
-                    print(f"\n📝 Classification:")
-                    for k, v in parsed.items():
-                        print(f"   {k}: {v}")
-
-                # For task1, we submit inspect_logs as the required action
                 action = {
                     "action_type": "inspect_logs",
                     "target_service": observation.get("alert_payload", {}).get("service"),
                     "parameters": parsed,
                 }
             else:
-                # Task 2/3: Execute the parsed action
                 action_type = parsed.get("action_type", "inspect_logs")
                 target = parsed.get("target_service", observation.get("alert_payload", {}).get("service"))
+                action = {"action_type": action_type, "target_service": target}
 
-                action = {
-                    "action_type": action_type,
-                    "target_service": target,
-                }
-
-            # Execute step
             reward_response = self.execute_step(action)
             step_num += 1
-            reward_val = reward_response.get("value", 0.0)
-            total_reward = reward_response.get("cumulative", 0.0)
-            done = reward_response.get("done", False)
+            reward_val = max(0.0, _coerce_float(reward_response.get("value", 0.0), 0.0))
+            step_rewards.append(reward_val)
+
+            done = bool(reward_response.get("done", False))
             info = reward_response.get("info", {})
+            error_token = _extract_error_token(info)
+            action_token = _format_action_token(action.get("action_type", "unknown"), action.get("target_service"))
 
-            if verbose:
-                status = "✅" if reward_val >= 0 else "❌"
-                print(f"\n  Step {step_num}: {action.get('action_type')} → {status} reward={reward_val:+.4f} (cum={total_reward:.4f})")
+            print(
+                f"[STEP] step={step_num} action={action_token} reward={reward_val:.2f} "
+                f"done={str(done).lower()} error={error_token}"
+            )
 
-            # Update observation with any new info
             if "action_result" in info:
-                observation["action_history"] = observation.get("action_history", []) + [
-                    action.get("action_type", "")
-                ]
+                observation["action_history"] = observation.get("action_history", []) + [action.get("action_type", "")]
                 observation["step_number"] = step_num
 
             final_info = info
 
-        # Print final results
-        final_score = final_info.get("final_score", total_reward)
+        computed_score = sum(step_rewards) / max(1, len(step_rewards))
+        raw_final_score = _coerce_float(final_info.get("final_score", computed_score), computed_score)
+        output_score = max(0.0, raw_final_score)
+        success = output_score > 0.10
+        rewards_csv = ",".join(f"{r:.2f}" for r in step_rewards) if step_rewards else "0.00"
 
-        if verbose:
-            print(f"\n{'='*60}")
-            print(f"🏁 Episode Complete")
-            print(f"   Steps Used: {step_num}")
-            print(f"   Cumulative Reward: {total_reward:.4f}")
-            print(f"   Final Score: {final_score:.4f}")
-            print(f"{'='*60}")
-
-        # Print in submission format
-        print(f"\n[START]")
-        if task == "task1":
-            parsed_final = parse_action_response(llm_response)
-            print(f"incident_type: {parsed_final.get('incident_type', 'unknown')}")
-            print(f"severity: {parsed_final.get('severity', 'P2')}")
-            print(f"primary_fault_service: {parsed_final.get('primary_fault_service', 'unknown')}")
-        else:
-            print(f"task: {task}")
-            print(f"final_score: {final_score:.4f}")
-            print(f"steps_used: {step_num}")
-            print(f"cumulative_reward: {total_reward:.4f}")
-        print(f"[END]")
+        print(
+            f"[END] success={str(success).lower()} steps={step_num} "
+            f"score={output_score:.2f} rewards={rewards_csv}"
+        )
 
         return {
             "task": task,
             "seed": seed,
             "steps_used": step_num,
-            "cumulative_reward": total_reward,
-            "final_score": final_score,
+            "cumulative_reward": sum(step_rewards),
+            "final_score": output_score,
+            "raw_final_score": raw_final_score,
+            "step_rewards": step_rewards,
             "final_info": final_info,
         }
 
 
-# ─── CLI Entry Point ───────────────────────────────────────────────────────────
-
-
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="SRE-Bench LLM Agent Baseline",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -496,7 +487,7 @@ def main():
     parser.add_argument(
         "--quiet",
         action="store_true",
-        help="Suppress verbose output",
+        help="Suppress non-structured logs",
     )
     parser.add_argument(
         "--all-tasks",
@@ -522,11 +513,15 @@ def main():
             )
             results.append(result)
 
-        print(f"\n{'='*60}")
-        print(f"📊 FINAL RESULTS SUMMARY")
-        print(f"{'='*60}")
-        for r in results:
-            print(f"  {r['task']}: score={r['final_score']:.4f} steps={r['steps_used']}")
+        if not args.quiet:
+            print("\n" + "=" * 60, file=sys.stderr)
+            print("FINAL RESULTS SUMMARY", file=sys.stderr)
+            print("=" * 60, file=sys.stderr)
+            for result in results:
+                print(
+                    f"  {result['task']}: score={result['final_score']:.4f} steps={result['steps_used']}",
+                    file=sys.stderr,
+                )
     else:
         agent.run_episode(
             task=args.task,
