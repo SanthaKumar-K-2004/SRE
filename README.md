@@ -20,6 +20,7 @@ It simulates the full incident lifecycle:
 - [What You Get](#what-you-get)
 - [Requirements](#requirements)
 - [Quick Start](#quick-start)
+- [Pre-Submission Checklist (5/5)](#pre-submission-checklist-55)
 - [Run Full Project Verification](#run-full-project-verification)
 - [API Reference](#api-reference)
 - [Action Space](#action-space)
@@ -115,11 +116,28 @@ python inference.py --task task3 --seed 42
 python inference.py --all-tasks --seed 42
 ```
 
-Optional environment variables:
-- `HF_TOKEN` (for Hugging Face Router model calls)
-- `HF_MODEL` (override default model)
+Optional/required environment variables for `inference.py`:
+- `API_BASE_URL` (default: `http://localhost:7860`)
+- `MODEL_NAME` (default: `mistralai/Mistral-7B-Instruct-v0.3`)
+- `HF_TOKEN` (no default; if missing, rule-based fallback is used)
+- `LOCAL_IMAGE_NAME` (optional; only needed for `from_docker_image()` workflows)
 
 If `HF_TOKEN` is not set, `inference.py` falls back to a rule-based agent.
+
+## Pre-Submission Checklist (5/5)
+
+Use this mapping to satisfy the submission portal checks:
+
+1. Sample `inference.py` flow followed
+   - `inference.py` uses env-configured API + model routing and a deterministic agent loop.
+2. Environment variables present in `inference.py`
+   - `API_BASE_URL`, `MODEL_NAME`, `HF_TOKEN`, optional `LOCAL_IMAGE_NAME`.
+3. Defaults set only for `API_BASE_URL` and `MODEL_NAME`
+   - `HF_TOKEN` intentionally has no default value.
+4. LLM calls use OpenAI client configured via variables
+   - `from openai import OpenAI` in `inference.py` and `OpenAI(..., api_key=HF_TOKEN)`.
+5. Stdout structured logs exact
+   - `python inference.py --task task3 --seed 42 --quiet` prints only `[START]`, `[STEP]`, `[END]` lines.
 
 ## Run Full Project Verification
 

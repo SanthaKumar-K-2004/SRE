@@ -20,11 +20,12 @@ import httpx
 
 
 # Configuration
-BASE_API_URL = "http://localhost:7860"
 ENV_NAME = "sre-bench"
-DEFAULT_API_URL = os.environ.get("API_BASE_URL", os.environ.get("SRE_BENCH_API_URL", BASE_API_URL))
-DEFAULT_MODEL = os.environ.get("MODEL_NAME", os.environ.get("HF_MODEL", "mistralai/Mistral-7B-Instruct-v0.3"))
-HF_TOKEN = os.environ.get("HF_TOKEN", os.environ.get("HUGGINGFACEHUB_API_TOKEN", ""))
+API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:7860")
+MODEL_NAME = os.getenv("MODEL_NAME", "mistralai/Mistral-7B-Instruct-v0.3")
+HF_TOKEN = os.getenv("HF_TOKEN")
+# Optional - if you use from_docker_image():
+LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME")
 MAX_RETRIES = 5
 RETRY_DELAYS = [1, 2, 4, 8, 16]
 
@@ -209,8 +210,8 @@ class SREAgent:
 
     def __init__(
         self,
-        api_url: str = DEFAULT_API_URL,
-        model: str = DEFAULT_MODEL,
+        api_url: str = API_BASE_URL,
+        model: str = MODEL_NAME,
         hf_token: str = HF_TOKEN,
     ):
         self.api_url = api_url.rstrip("/")
@@ -475,14 +476,14 @@ def main() -> None:
     parser.add_argument(
         "--url",
         type=str,
-        default=DEFAULT_API_URL,
-        help=f"API base URL (default: {DEFAULT_API_URL})",
+        default=API_BASE_URL,
+        help=f"API base URL (default: {API_BASE_URL})",
     )
     parser.add_argument(
         "--model",
         type=str,
-        default=DEFAULT_MODEL,
-        help=f"LLM model name (default: {DEFAULT_MODEL})",
+        default=MODEL_NAME,
+        help=f"LLM model name (default: {MODEL_NAME})",
     )
     parser.add_argument(
         "--quiet",
