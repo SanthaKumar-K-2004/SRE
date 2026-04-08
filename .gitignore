@@ -1,0 +1,18 @@
+# Environment and build files
+venv/
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+
+# Testing and coverage
+.pytest_cache/
+.coverage
+.hypothesis/
+
+# Application data
+output.json
+
+# IDE config
+.vscode/
+.idea/
