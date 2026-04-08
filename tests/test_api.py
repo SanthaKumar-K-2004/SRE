@@ -91,6 +91,18 @@ class TestHealthEndpoint:
 
 
 class TestResetEndpoint:
+    def test_reset_without_body_returns_200(self, client):
+        response = client.post("/reset")
+        assert response.status_code == 200
+
+    def test_reset_null_body_returns_200(self, client):
+        response = client.post(
+            "/reset",
+            data="null",
+            headers={"Content-Type": "application/json"},
+        )
+        assert response.status_code == 200
+
     def test_reset_returns_200(self, client):
         response = client.post("/reset", json={"task": "task1", "seed": 0})
         assert response.status_code == 200

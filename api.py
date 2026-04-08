@@ -11,7 +11,7 @@ Endpoints:
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -88,7 +88,7 @@ async def health_check() -> HealthResponse:
 
 
 @app.post("/reset", response_model=SREObservation, tags=["Environment"])
-async def reset_episode(request: ResetRequest) -> SREObservation:
+async def reset_episode(request: Optional[ResetRequest] = None) -> SREObservation:
     """
     Initialize a new episode.
 
@@ -100,9 +100,10 @@ async def reset_episode(request: ResetRequest) -> SREObservation:
     """
     try:
         environment = get_env()
+        payload = request or ResetRequest()
         observation = environment.reset(
-            task=request.task.value,
-            seed=request.seed,
+            task=payload.task.value,
+            seed=payload.seed,
         )
         return observation
     except FileNotFoundError as e:
