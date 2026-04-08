@@ -1,3 +1,10 @@
+---
+title: SRE-Bench
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # SRE-Bench
 
 SRE-Bench is a deterministic reinforcement learning environment for training and evaluating AI agents on on-call incident response workflows.
@@ -38,6 +45,13 @@ It simulates the full incident lifecycle:
 - `pip`
 
 ## Quick Start
+
+## Space URLs
+
+After deployment on Hugging Face Spaces:
+- Root: `/`
+- Health: `/health`
+- Docs: `/docs`
 
 ### 1. Clone and enter the project
 ```bash

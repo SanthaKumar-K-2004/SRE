@@ -66,6 +66,19 @@ def client(test_dataset):
         yield c
 
 
+
+
+class TestRootEndpoint:
+    def test_root_returns_200(self, client):
+        response = client.get("/")
+        assert response.status_code == 200
+
+    def test_root_returns_status_and_docs(self, client):
+        response = client.get("/")
+        data = response.json()
+        assert data["status"] == "ok"
+        assert data["docs"] == "/docs"
+
 class TestHealthEndpoint:
     def test_health_returns_200(self, client):
         response = client.get("/health")

@@ -64,6 +64,23 @@ def get_env() -> SREBenchEnv:
 # ─── Endpoints ──────────────────────────────────────────────────────────────────
 
 
+@app.get("/", tags=["System"])
+async def root() -> Dict[str, Any]:
+    """
+    Root endpoint for deployment platforms and quick manual checks.
+
+    Returns a compact API status payload with useful links.
+    """
+    return {
+        "name": "SRE-Bench",
+        "status": "ok",
+        "version": app.version,
+        "docs": "/docs",
+        "health": "/health",
+        "openapi": "/openapi.json",
+    }
+
+
 @app.get("/health", response_model=HealthResponse, tags=["System"])
 async def health_check() -> HealthResponse:
     """Health check endpoint — required by HuggingFace Spaces."""
