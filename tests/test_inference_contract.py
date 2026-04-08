@@ -7,10 +7,14 @@ import socket
 import subprocess
 import sys
 import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from threading import Thread
 
 import httpx
 import pytest
+
+import inference as inference_module
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -40,6 +44,7 @@ def api_server_url() -> str:
             "127.0.0.1",
             "--port",
             str(port),
+            "--no-access-log",
         ],
         cwd=REPO_ROOT,
         env=env,
@@ -82,6 +87,47 @@ def api_server_url() -> str:
             proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             proc.kill()
+
+
+def _make_observation(
+    title: str,
+    service: str = "api-gateway",
+    logs: list[str] | None = None,
+    metrics: dict[str, float] | None = None,
+) -> dict[str, object]:
+    return {
+        "incident_id": "INC-TEST-0001",
+        "alert_payload": {
+            "title": title,
+            "service": service,
+            "severity": "P1",
+            "timestamp": "2026-04-08T10:00:00Z",
+        },
+        "service_topology": {
+            "nodes": [service, "auth-service", "payment-service"],
+            "edges": [[service, "auth-service"]],
+        },
+        "logs": logs or [f"{service} generic diagnostic log"],
+        "metrics": metrics or {
+            "cpu": 25.0,
+            "memory": 35.0,
+            "latency_ms": 125.0,
+            "error_rate": 0.5,
+        },
+        "action_history": [],
+        "step_number": 0,
+        "incident_resolved": False,
+    }
+
+
+def _make_mock_agent(handler) -> inference_module.SREAgent:
+    agent = inference_module.SREAgent(api_url="http://testserver", hf_token=None)
+    agent.client.close()
+    agent.client = httpx.Client(
+        transport=httpx.MockTransport(handler),
+        timeout=inference_module.HTTP_TIMEOUT,
+    )
+    return agent
 
 
 def test_inference_env_declarations_are_strict() -> None:
@@ -132,3 +178,160 @@ def test_inference_quiet_stdout_is_structured_only(api_server_url: str) -> None:
     allowed_prefixes = ("[START]", "[STEP]", "[END]")
     unexpected = [line for line in lines if not line.startswith(allowed_prefixes)]
     assert not unexpected, f"Found non-structured stdout lines: {unexpected}"
+
+
+def test_waits_for_cold_start_before_reset(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = {"health": 0, "reset": 0}
+    observation = _make_observation("[P1] Deployment Failure on auth-service", service="auth-service")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/health":
+            calls["health"] += 1
+            status_code = 503 if calls["health"] < 3 else 200
+            payload = {"status": "starting"} if status_code != 200 else {"status": "ok"}
+            return httpx.Response(status_code, json=payload)
+        if request.url.path == "/reset":
+            calls["reset"] += 1
+            return httpx.Response(200, json=observation)
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    monkeypatch.setattr(inference_module.time, "sleep", lambda *_args, **_kwargs: None)
+    agent = _make_mock_agent(handler)
+    try:
+        result = agent.reset_episode("task1", seed=42)
+    finally:
+        agent.close()
+
+    assert result["ok"] is True
+    assert calls["health"] == 3
+    assert calls["reset"] == 1
+
+
+def test_reset_retries_transient_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = {"reset": 0}
+    observation = _make_observation("[P1] Db Overload on order-service", service="order-service")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/health":
+            return httpx.Response(200, json={"status": "ok"})
+        if request.url.path == "/reset":
+            calls["reset"] += 1
+            if calls["reset"] == 1:
+                return httpx.Response(503, json={"error": "warming_up"})
+            return httpx.Response(200, json=observation)
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    monkeypatch.setattr(inference_module.time, "sleep", lambda *_args, **_kwargs: None)
+    agent = _make_mock_agent(handler)
+    try:
+        result = agent.reset_episode("task1", seed=7)
+    finally:
+        agent.close()
+
+    assert result["ok"] is True
+    assert calls["reset"] == 2
+
+
+def test_reset_failure_emits_start_and_end_without_crashing(monkeypatch: pytest.MonkeyPatch) -> None:
+    port = _find_free_port()
+
+    class FailingResetHandler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802
+            if self.path == "/health":
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"status":"ok"}')
+                return
+            self.send_error(404)
+
+        def do_POST(self) -> None:  # noqa: N802
+            if self.path == "/reset":
+                self.send_response(500)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"error":"reset_failed","message":"boom"}')
+                return
+            self.send_error(404)
+
+        def log_message(self, format: str, *args: object) -> None:  # noqa: A003
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", port), FailingResetHandler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+
+    env = os.environ.copy()
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONPATH"] = "."
+    env.pop("HF_TOKEN", None)
+
+    try:
+        result = subprocess.run(
+            [
+                sys.executable,
+                "inference.py",
+                "--task",
+                "task1",
+                "--seed",
+                "42",
+                "--quiet",
+                "--url",
+                f"http://127.0.0.1:{port}",
+            ],
+            cwd=REPO_ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=True,
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+    lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    assert result.returncode == 0
+    assert lines[0].startswith("[START]")
+    assert lines[-1] == "[END] success=false steps=0 score=0.00 rewards=0.00"
+
+
+def test_title_based_family_inference_ignores_red_herring_logs() -> None:
+    observation = _make_observation(
+        "[P2] Network Partition on auth-service",
+        service="auth-service",
+        logs=[
+            "Deploy v3.1.0 started successfully",
+            "Config reload triggered at 2026-04-08 10:00:00",
+            "ERROR auth-service: TCP RST received from api-gateway",
+        ],
+        metrics={
+            "cpu": 22.0,
+            "memory": 48.0,
+            "latency_ms": 18250.0,
+            "error_rate": 51.0,
+        },
+    )
+
+    assert inference_module.infer_incident_family(observation) == "network_partition"
+
+
+def test_task3_deterministic_planner_handles_all_hard_seeds(api_server_url: str) -> None:
+    agent = inference_module.SREAgent(
+        api_url=api_server_url,
+        model=inference_module.MODEL_NAME,
+        hf_token=None,
+    )
+
+    try:
+        for seed in range(30):
+            result = agent.run_episode(
+                task="task3",
+                seed=seed,
+                verbose=False,
+            )
+            assert result["steps_used"] <= inference_module.TASK_STEP_LIMITS["task3"]
+            assert result["final_score"] >= 0.15
+    finally:
+        agent.close()
