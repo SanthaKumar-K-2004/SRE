@@ -181,7 +181,12 @@ def _make_observation(
 
 
 def _make_mock_agent(handler) -> inference_module.SREAgent:
-    agent = inference_module.SREAgent(api_url="http://testserver", hf_token=None)
+    agent = inference_module.SREAgent(
+        api_url="http://testserver",
+        llm_base_url=None,
+        llm_api_key=None,
+        hf_token=None,
+    )
     agent.client.close()
     agent.client = httpx.Client(
         transport=httpx.MockTransport(handler),
@@ -194,10 +199,53 @@ def test_inference_env_declarations_are_strict() -> None:
     """Ensure env-var declarations match strict submission checklist style."""
     content = INFERENCE_PATH.read_text(encoding="utf-8")
 
-    assert 'API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:7860")' in content
+    assert 'ENV_BASE_URL = os.getenv("ENV_BASE_URL", "http://localhost:7860")' in content
+    assert 'API_BASE_URL = os.getenv("API_BASE_URL")' in content
+    assert 'API_KEY = os.getenv("API_KEY")' in content
     assert 'MODEL_NAME = os.getenv("MODEL_NAME", "mistralai/Mistral-7B-Instruct-v0.3")' in content
     assert 'HF_TOKEN = os.getenv("HF_TOKEN")' in content
     assert 'LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME")' in content
+
+
+def test_proxy_client_uses_api_base_url_and_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeCompletions:
+        def create(self, **kwargs):
+            captured["create_kwargs"] = kwargs
+            choice = type("Choice", (), {"message": type("Message", (), {"content": "[START]\naction_type: inspect_logs\ntarget_service: api-gateway\n[END]"})()})()
+            return type("Resp", (), {"choices": [choice]})()
+
+    class _FakeChat:
+        def __init__(self):
+            self.completions = _FakeCompletions()
+
+    class _FakeOpenAI:
+        def __init__(self, *, base_url, api_key):
+            captured["base_url"] = base_url
+            captured["api_key"] = api_key
+            self.chat = _FakeChat()
+
+    monkeypatch.setattr("openai.OpenAI", _FakeOpenAI)
+
+    agent = inference_module.SREAgent(
+        api_url="http://testserver",
+        model="test-model",
+        llm_base_url="https://proxy.example/v1",
+        llm_api_key="proxy-key",
+        hf_token=None,
+    )
+    try:
+        output = agent.get_llm_response("hello")
+    finally:
+        agent.close()
+
+    assert output is not None
+    assert captured["base_url"] == "https://proxy.example/v1"
+    assert captured["api_key"] == "proxy-key"
+    create_kwargs = captured["create_kwargs"]
+    assert isinstance(create_kwargs, dict)
+    assert create_kwargs["model"] == "test-model"
 
 
 def test_inference_quiet_stdout_is_structured_only(api_server_url: str) -> None:
@@ -206,6 +254,8 @@ def test_inference_quiet_stdout_is_structured_only(api_server_url: str) -> None:
     env["PYTHONUTF8"] = "1"
     env["PYTHONPATH"] = "."
     env.pop("HF_TOKEN", None)
+    env.pop("API_KEY", None)
+    env.pop("API_BASE_URL", None)
 
     cmd = [
         sys.executable,
@@ -349,6 +399,8 @@ def test_reset_failure_emits_start_and_end_without_crashing(monkeypatch: pytest.
     env["PYTHONUTF8"] = "1"
     env["PYTHONPATH"] = "."
     env.pop("HF_TOKEN", None)
+    env.pop("API_KEY", None)
+    env.pop("API_BASE_URL", None)
 
     try:
         result = subprocess.run(
@@ -386,6 +438,8 @@ def test_server_entrypoint_smoke_runs_inference_without_crashing(server_entrypoi
     env["PYTHONUTF8"] = "1"
     env["PYTHONPATH"] = "."
     env.pop("HF_TOKEN", None)
+    env.pop("API_KEY", None)
+    env.pop("API_BASE_URL", None)
 
     result = subprocess.run(
         [
@@ -437,6 +491,8 @@ def test_task3_deterministic_planner_handles_all_hard_seeds(api_server_url: str)
     agent = inference_module.SREAgent(
         api_url=api_server_url,
         model=inference_module.MODEL_NAME,
+        llm_base_url=None,
+        llm_api_key=None,
         hf_token=None,
     )
 

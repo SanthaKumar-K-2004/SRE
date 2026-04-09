@@ -118,12 +118,14 @@ python inference.py --all-tasks --seed 42
 ```
 
 Optional/required environment variables for `inference.py`:
-- `API_BASE_URL` (default: `http://localhost:7860`)
+- `ENV_BASE_URL` (default: `http://localhost:7860`) for environment endpoints (`/health`, `/reset`, `/step`)
+- `API_BASE_URL` (no default) for evaluator LiteLLM/OpenAI proxy base URL
+- `API_KEY` (no default) for evaluator LiteLLM/OpenAI proxy API key
 - `MODEL_NAME` (default: `mistralai/Mistral-7B-Instruct-v0.3`)
-- `HF_TOKEN` (no default; if missing, rule-based fallback is used)
+- `HF_TOKEN` (optional compatibility fallback only when `API_KEY` is absent)
 - `LOCAL_IMAGE_NAME` (optional; only needed for `from_docker_image()` workflows)
 
-If `HF_TOKEN` is not set, `inference.py` falls back to a rule-based agent.
+If `API_BASE_URL` or `API_KEY` is missing, `inference.py` falls back to a deterministic rule-based agent.
 
 ## Pre-Submission Checklist (5/5)
 
@@ -132,11 +134,11 @@ Use this mapping to satisfy the submission portal checks:
 1. Sample `inference.py` flow followed
    - `inference.py` uses env-configured API + model routing and a deterministic agent loop.
 2. Environment variables present in `inference.py`
-   - `API_BASE_URL`, `MODEL_NAME`, `HF_TOKEN`, optional `LOCAL_IMAGE_NAME`.
-3. Defaults set only for `API_BASE_URL` and `MODEL_NAME`
-   - `HF_TOKEN` intentionally has no default value.
+   - `ENV_BASE_URL`, `API_BASE_URL`, `API_KEY`, `MODEL_NAME`, `HF_TOKEN`, optional `LOCAL_IMAGE_NAME`.
+3. Defaults set only for `ENV_BASE_URL` and `MODEL_NAME`
+   - `API_BASE_URL`, `API_KEY`, and `HF_TOKEN` intentionally have no default values.
 4. LLM calls use OpenAI client configured via variables
-   - `from openai import OpenAI` in `inference.py` and `OpenAI(..., api_key=HF_TOKEN)`.
+   - `from openai import OpenAI` in `inference.py` and `OpenAI(base_url=API_BASE_URL, api_key=API_KEY)`.
 5. Stdout structured logs exact
    - `python inference.py --task task3 --seed 42 --quiet` prints only `[START]`, `[STEP]`, `[END]` lines.
 
@@ -206,6 +208,11 @@ Submission flow (recommended):
 5. Confirm the live Space is healthy at `https://santhakumar-k-2004-sre-bench.hf.space/health`.
 6. Confirm the raw Space code is updated at `https://huggingface.co/spaces/santhakumar-k-2004/sre-bench/raw/main/inference.py`.
 7. Let the team lead click `Update submission`.
+
+Evaluator LLM criteria note:
+
+- The evaluator expects at least one LLM call through injected `API_BASE_URL` + `API_KEY`.
+- Do not bypass proxy routing with hardcoded provider URLs or alternate credentials.
 
 What `validate-submission.sh` enforces:
 

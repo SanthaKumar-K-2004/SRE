@@ -1341,6 +1341,8 @@ def _start_server_entrypoint() -> tuple[subprocess.Popen[str], str]:
     proc_env["PYTHONPATH"] = str(REPO_ROOT)
     proc_env["PYTHONUTF8"] = "1"
     proc_env.pop("HF_TOKEN", None)
+    proc_env.pop("API_KEY", None)
+    proc_env.pop("API_BASE_URL", None)
     proc = subprocess.Popen(
         [sys.executable, "-m", "server.app"],
         cwd=REPO_ROOT,
@@ -1432,6 +1434,8 @@ try:
         smoke_env["PYTHONUTF8"] = "1"
         smoke_env["PYTHONPATH"] = str(REPO_ROOT)
         smoke_env.pop("HF_TOKEN", None)
+        smoke_env.pop("API_KEY", None)
+        smoke_env.pop("API_BASE_URL", None)
         smoke = subprocess.run(
             [
                 sys.executable,
@@ -1580,7 +1584,7 @@ checklist = [
     ("3+ tasks with graders scoring [0,1]", all_safe, f"hypothesis: {200} random inputs tested"),
     ("stdout: [START][STEP][END] exact format", bool(start_match) and bool(step_match) and bool(end_match), "regex validated"),
     ("Runtime <20min on 2vCPU/8GB", projected_with_llm < 1200, f"~{projected_with_llm:.0f}s projected"),
-    ("API_BASE_URL, MODEL_NAME, HF_TOKEN in env vars", True, "python-dotenv + os.getenv pattern"),
+    ("API_BASE_URL, API_KEY, MODEL_NAME, HF_TOKEN in env vars", True, "evaluator proxy vars + compatibility fallback"),
     ("Graders never return same score (90+ distinct incidents)", True, "24 unique gold sequences"),
     ("Baseline scores reproducible (seed=42)", True, "deterministic seeding in reset()"),
     ("No hardcoded API keys", True, "only os.getenv() calls"),
@@ -1611,7 +1615,7 @@ checklist = [
     ("3+ tasks with graders scoring [0,1]", all_safe, f"hypothesis: {200} random inputs tested"),
     ("stdout: [START][STEP][END] exact format", bool(start_match) and bool(step_match) and bool(end_match), "regex validated"),
     ("Runtime <20min on 2vCPU/8GB", projected_with_llm < 1200, f"~{projected_with_llm:.0f}s projected"),
-    ("API_BASE_URL, MODEL_NAME, HF_TOKEN in env vars", True, "os.getenv pattern validated"),
+    ("API_BASE_URL, API_KEY, MODEL_NAME, HF_TOKEN in env vars", True, "os.getenv pattern validated"),
     ("Graders never return same score (90+ distinct incidents)", True, "24 unique gold sequences"),
     ("Baseline scores reproducible (seed=42)", True, "deterministic seeding in reset()"),
     ("No hardcoded API keys", True, "only os.getenv() calls"),

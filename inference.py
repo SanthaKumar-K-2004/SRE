@@ -21,8 +21,10 @@ import httpx
 
 # Configuration
 ENV_NAME = "sre-bench"
-API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:7860")
+ENV_BASE_URL = os.getenv("ENV_BASE_URL", "http://localhost:7860")
+API_BASE_URL = os.getenv("API_BASE_URL")
 MODEL_NAME = os.getenv("MODEL_NAME", "mistralai/Mistral-7B-Instruct-v0.3")
+API_KEY = os.getenv("API_KEY")
 HF_TOKEN = os.getenv("HF_TOKEN")
 # Optional - if you use from_docker_image():
 LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME")
@@ -445,13 +447,20 @@ class SREAgent:
 
     def __init__(
         self,
-        api_url: str = API_BASE_URL,
+        api_url: str = ENV_BASE_URL,
         model: str = MODEL_NAME,
-        hf_token: str = HF_TOKEN,
+        llm_base_url: Optional[str] = API_BASE_URL,
+        llm_api_key: Optional[str] = API_KEY,
+        hf_token: Optional[str] = HF_TOKEN,
     ):
         self.api_url = api_url.rstrip("/")
         self.model = model
-        self.hf_token = hf_token
+        self.llm_base_url = (llm_base_url or "").strip() or None
+        self.llm_api_key = (llm_api_key or "").strip() or None
+        # Backward-compatible local fallback only when evaluator API_KEY is not provided.
+        self.hf_token = (hf_token or "").strip() or None
+        if not self.llm_api_key and self.hf_token:
+            self.llm_api_key = self.hf_token
         self.client = httpx.Client(timeout=HTTP_TIMEOUT)
         self._response_cache: Dict[str, str] = {}
         self.verbose = True
@@ -610,10 +619,10 @@ class SREAgent:
 
     def get_llm_response(self, prompt: str) -> Optional[str]:
         """
-        Get a response from the LLM via HuggingFace Router.
-        Falls back to rule-based only when no HF token is set.
+        Get a response from the LLM via an OpenAI-compatible proxy.
+        Falls back to rule-based only when proxy configuration is unavailable.
         """
-        if not self.hf_token:
+        if not self.llm_base_url or not self.llm_api_key:
             return self._rule_based_response(prompt)
 
         cache_key = prompt[:200]
@@ -622,7 +631,7 @@ class SREAgent:
 
         for attempt, delay in enumerate(RETRY_DELAYS):
             try:
-                response = self._call_hf_router(prompt)
+                response = self._call_llm_proxy(prompt)
                 if response:
                     self._response_cache[cache_key] = response
                     return response
@@ -637,8 +646,8 @@ class SREAgent:
 
         return None
 
-    def _call_hf_router(self, prompt: str) -> Optional[str]:
-        """Call HuggingFace Router (OpenAI-compatible endpoint)."""
+    def _call_llm_proxy(self, prompt: str) -> Optional[str]:
+        """Call the evaluator-provided OpenAI-compatible LiteLLM proxy."""
         try:
             from openai import OpenAI
         except ImportError:
@@ -646,8 +655,8 @@ class SREAgent:
             return None
 
         client = OpenAI(
-            base_url="https://api-inference.huggingface.co/v1/",
-            api_key=self.hf_token,
+            base_url=self.llm_base_url,
+            api_key=self.llm_api_key,
         )
 
         response = client.chat.completions.create(
@@ -930,8 +939,8 @@ def main() -> None:
     parser.add_argument(
         "--url",
         type=str,
-        default=API_BASE_URL,
-        help=f"API base URL (default: {API_BASE_URL})",
+        default=ENV_BASE_URL,
+        help=f"Environment API base URL (default: {ENV_BASE_URL})",
     )
     parser.add_argument(
         "--model",
@@ -957,6 +966,8 @@ def main() -> None:
         agent = SREAgent(
             api_url=args.url,
             model=args.model,
+            llm_base_url=API_BASE_URL,
+            llm_api_key=API_KEY,
             hf_token=HF_TOKEN,
         )
 
