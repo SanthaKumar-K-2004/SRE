@@ -163,6 +163,20 @@ PYTHONUTF8=1 PYTHONPATH=. python verify_sre_bench.py --gate phase1
 PYTHONUTF8=1 PYTHONPATH=. python verify_sre_bench.py --gate phase2
 ```
 
+Final remote submission guard:
+
+```bash
+bash validate-submission.sh
+```
+
+PowerShell equivalent:
+
+```powershell
+.\validate-submission.ps1
+```
+
+This final guard expects GitHub `main` and Hugging Face Space `main` to already be in sync.
+
 ## GitHub to Hugging Face Sync
 
 To prevent GitHub/Space drift, this repo uses `.github/workflows/sync-space.yml`:
@@ -177,10 +191,21 @@ Required repository secret:
 
 Submission flow (recommended):
 
-1. `git push origin main`
-2. Wait for GitHub Actions job `sync-space` to succeed.
-3. Verify Space code is updated at `https://huggingface.co/spaces/santhakumar-k-2004/sre-bench/raw/main/inference.py`.
-4. Submit in the evaluator.
+1. Run local gates: `pytest -q`, `python verify_sre_bench.py --gate phase1`, `python verify_sre_bench.py --gate phase2`, `python verify_sre_bench.py`.
+2. `git push origin main`
+3. Wait for GitHub Actions job `sync-space` to succeed.
+4. Run `bash validate-submission.sh` (Linux/macOS) or `.\validate-submission.ps1` (PowerShell)
+5. Confirm the live Space is healthy at `https://santhakumar-k-2004-sre-bench.hf.space/health`.
+6. Confirm the raw Space code is updated at `https://huggingface.co/spaces/santhakumar-k-2004/sre-bench/raw/main/inference.py`.
+7. Let the team lead click `Update submission`.
+
+What `validate-submission.sh` enforces:
+
+1. Runs the current local gates and the full verifier.
+2. Confirms `origin/main` and Space `main` point to the same commit.
+3. Waits for Space `/health` to return `200 {"status":"ok"}`.
+4. Confirms remote `inference.py` no longer contains stale `raise_for_status(`.
+5. Runs `python inference.py --task task1 --seed 42 --quiet --url https://santhakumar-k-2004-sre-bench.hf.space`.
 
 ## API Reference
 

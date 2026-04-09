@@ -70,17 +70,11 @@ jobs:
             git push hf-space HEAD:main
           fi
 
-      - name: Verify Space main reflects runtime hardening
+      - name: Verify live Space release readiness
+        env:
+          PYTHONUTF8: "1"
+          PYTHONPATH: "."
         run: |
-          python - <<'PY'
-          import sys
-          import httpx
-
-          url = "https://huggingface.co/spaces/santhakumar-k-2004/sre-bench/raw/main/inference.py"
-          response = httpx.get(url, timeout=30.0)
-          response.raise_for_status()
-          if "raise_for_status(" in response.text:
-              print("Space inference.py still contains stale raise_for_status calls.")
-              sys.exit(1)
-          print("Space inference.py sync verification passed.")
-          PY
+          python check_space_release.py \
+            --space-url https://santhakumar-k-2004-sre-bench.hf.space \
+            --raw-url https://huggingface.co/spaces/santhakumar-k-2004/sre-bench/raw/main/inference.py

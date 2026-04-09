@@ -1,123 +1,65 @@
-#!/bin/bash
-# SRE-Bench Pre-Submission Validation Script
-# Run this before submitting to verify everything works.
+#!/usr/bin/env bash
+# Final release guard for SRE-Bench submissions.
 
-set -e
+set -euo pipefail
 
-echo "🔍 SRE-Bench Pre-Submission Validation"
-echo "======================================="
+SPACE_BASE_URL="${SPACE_BASE_URL:-https://santhakumar-k-2004-sre-bench.hf.space}"
+SPACE_RAW_INFERENCE_URL="${SPACE_RAW_INFERENCE_URL:-https://huggingface.co/spaces/santhakumar-k-2004/sre-bench/raw/main/inference.py}"
+SPACE_GIT_URL="${SPACE_GIT_URL:-https://huggingface.co/spaces/santhakumar-k-2004/sre-bench}"
 
-# 1. Check all required files exist
-echo ""
-echo "📁 Checking required files..."
-REQUIRED_FILES=(
-    "environment.py"
-    "state_machine.py"
-    "models.py"
-    "rewards.py"
-    "api.py"
-    "inference.py"
-    "generate_dataset.py"
-    "Dockerfile"
-    "requirements.txt"
-    "README.md"
-    "tasks/__init__.py"
-    "tasks/task1.py"
-    "tasks/task2.py"
-    "tasks/task3.py"
-    "data/incidents.json"
-    "tests/test_models.py"
-    "tests/test_state_machine.py"
-    "tests/test_graders.py"
-    "tests/test_environment.py"
-    "tests/test_api.py"
-)
+info() {
+  printf '[INFO] %s\n' "$1"
+}
 
-MISSING=0
-for f in "${REQUIRED_FILES[@]}"; do
-    if [ -f "$f" ]; then
-        echo "  ✅ $f"
-    else
-        echo "  ❌ $f MISSING"
-        MISSING=$((MISSING + 1))
-    fi
-done
+pass() {
+  printf '[PASS] %s\n' "$1"
+}
 
-if [ $MISSING -gt 0 ]; then
-    echo "❌ $MISSING required files missing!"
-    exit 1
-fi
-echo "✅ All required files present"
+fail() {
+  printf '[FAIL] %s\n' "$1" >&2
+  exit 1
+}
 
-# 2. Check dataset
-echo ""
-echo "📊 Checking dataset..."
-INCIDENT_COUNT=$(./venv/Scripts/python.exe -c "import json; data=json.load(open('data/incidents.json')); print(len(data))" 2>/dev/null || venv/bin/python -c "import json; data=json.load(open('data/incidents.json')); print(len(data))")
-echo "  Incidents: $INCIDENT_COUNT"
-if [ "$INCIDENT_COUNT" -ne 90 ]; then
-    echo "  ❌ Expected 90 incidents, got $INCIDENT_COUNT"
-    exit 1
-fi
-echo "  ✅ Dataset valid (90 incidents)"
-
-# 3. Run tests
-echo ""
-echo "🧪 Running tests..."
-./venv/Scripts/python.exe -m pytest --cov=. tests/ -q 2>/dev/null || venv/bin/python -m pytest --cov=. tests/ -q
-echo "✅ All tests passed"
-
-# 4. Check API starts
-echo ""
-echo "🌐 Testing API startup..."
-./venv/Scripts/uvicorn.exe api:app --host 0.0.0.0 --port 7860 & 2>/dev/null || venv/bin/uvicorn api:app --host 0.0.0.0 --port 7860 &
-API_PID=$!
-sleep 3
-
-# Health check
-HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:7860/health)
-if [ "$HTTP_STATUS" -eq 200 ]; then
-    echo "  ✅ /health returns 200"
+if [ -n "${PYTHON_BIN:-}" ]; then
+  PYTHON="$PYTHON_BIN"
+elif command -v python >/dev/null 2>&1; then
+  PYTHON="python"
+elif command -v python3 >/dev/null 2>&1; then
+  PYTHON="python3"
 else
-    echo "  ❌ /health returned $HTTP_STATUS"
-    kill $API_PID 2>/dev/null
-    exit 1
+  fail "python or python3 is required"
 fi
 
-# Reset check
-RESET_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:7860/reset \
-    -H 'Content-Type: application/json' \
-    -d '{"task": "task1", "seed": 42}')
-if [ "$RESET_STATUS" -eq 200 ]; then
-    echo "  ✅ /reset returns 200"
-else
-    echo "  ❌ /reset returned $RESET_STATUS"
-    kill $API_PID 2>/dev/null
-    exit 1
+export PYTHONUTF8=1
+export PYTHONPATH=.
+
+info "Running local validation gates"
+"$PYTHON" -m pytest -q
+"$PYTHON" verify_sre_bench.py --gate phase1
+"$PYTHON" verify_sre_bench.py --gate phase2
+"$PYTHON" verify_sre_bench.py
+pass "Local validation gates passed"
+
+command -v git >/dev/null 2>&1 || fail "git is required for ref-alignment checks"
+
+info "Checking GitHub main and Hugging Face Space main alignment"
+git fetch origin main >/dev/null
+ORIGIN_SHA="$(git rev-parse origin/main)"
+SPACE_SHA="$(git ls-remote "$SPACE_GIT_URL" refs/heads/main | awk '{print $1}')"
+
+[ -n "$SPACE_SHA" ] || fail "Unable to resolve Hugging Face Space main"
+
+if [ "$ORIGIN_SHA" != "$SPACE_SHA" ]; then
+  fail "GitHub main ($ORIGIN_SHA) and HF Space main ($SPACE_SHA) are out of sync"
 fi
+pass "GitHub main and HF Space main match at $ORIGIN_SHA"
 
-# Step check
-STEP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:7860/step \
-    -H 'Content-Type: application/json' \
-    -d '{"action_type": "inspect_logs", "target_service": "api-gateway"}')
-if [ "$STEP_STATUS" -eq 200 ]; then
-    echo "  ✅ /step returns 200"
-else
-    echo "  ❌ /step returned $STEP_STATUS"
-    kill $API_PID 2>/dev/null
-    exit 1
-fi
+info "Checking live Space health, raw inference sync, and remote smoke"
+"$PYTHON" check_space_release.py \
+  --space-url "$SPACE_BASE_URL" \
+  --raw-url "$SPACE_RAW_INFERENCE_URL"
+pass "Live Space release checks passed"
 
-kill $API_PID 2>/dev/null
-echo "✅ API endpoints working"
-
-# 5. Summary
-echo ""
-echo "======================================="
-echo "🎉 All validation checks passed!"
-echo "  📁 Files:    ${#REQUIRED_FILES[@]}/${#REQUIRED_FILES[@]}"
-echo "  📊 Dataset:  90 incidents"
-echo "  🧪 Tests:    All passed"
-echo "  🌐 API:      All endpoints responding"
-echo "======================================="
-echo ""
-echo "Ready for submission! 🚀"
+printf '\n'
+pass "Submission guard completed successfully"
+info "Team lead can now click Update submission."
