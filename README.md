@@ -192,6 +192,11 @@ Required repository secret (one of the following):
 
 If neither secret is configured, the workflow still runs validation but skips Space sync and emits a warning.
 
+Optional strict mode:
+
+- Set repository variable `REQUIRE_SPACE_SYNC=true` to fail the workflow when neither token secret is configured.
+- Leave it unset (or set to `false`) to keep default non-blocking validation mode.
+
 Submission flow (recommended):
 
 1. Run local gates: `pytest -q`, `python verify_sre_bench.py --gate phase1`, `python verify_sre_bench.py --gate phase2`, `python verify_sre_bench.py`.
@@ -209,6 +214,10 @@ What `validate-submission.sh` enforces:
 3. Waits for Space `/health` to return `200 {"status":"ok"}`.
 4. Confirms remote `inference.py` no longer contains stale `raise_for_status(`.
 5. Runs `python inference.py --task task1 --seed 42 --quiet --url https://santhakumar-k-2004-sre-bench.hf.space`.
+
+Troubleshooting note:
+
+- GitHub failure emails may reference older commits (for example `695bb05`) even after a newer commit run is green. Always check the latest workflow run on `main` by timestamp and commit SHA.
 
 ## API Reference
 

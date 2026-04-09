@@ -16,15 +16,17 @@ concurrency:
 jobs:
   validate-and-sync:
     runs-on: ubuntu-latest
+    env:
+      REQUIRE_SPACE_SYNC: ${{ vars.REQUIRE_SPACE_SYNC }}
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
@@ -49,6 +51,11 @@ jobs:
           set -euo pipefail
           token=""
           source_name=""
+          strict_mode="$(printf '%s' "${REQUIRE_SPACE_SYNC:-false}" | tr '[:upper:]' '[:lower:]')"
+          if [ -z "${strict_mode}" ]; then
+            strict_mode="false"
+          fi
+
           if [ -n "${HF_SPACE_WRITE_TOKEN}" ]; then
             token="${HF_SPACE_WRITE_TOKEN}"
             source_name="HF_SPACE_WRITE_TOKEN"
@@ -58,6 +65,12 @@ jobs:
           fi
 
           if [ -z "${token}" ]; then
+            if [ "${strict_mode}" = "true" ]; then
+              echo "SYNC_ENABLED=false" >> "${GITHUB_ENV}"
+              echo "::error::REQUIRE_SPACE_SYNC=true but no Hugging Face write token is configured. Set HF_SPACE_WRITE_TOKEN (preferred) or HF_TOKEN."
+              exit 1
+            fi
+
             echo "SYNC_ENABLED=false" >> "${GITHUB_ENV}"
             echo "::warning::Missing Hugging Face write token. Set HF_SPACE_WRITE_TOKEN (preferred) or HF_TOKEN to enable automatic Space sync."
             exit 0
