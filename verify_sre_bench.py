@@ -4,7 +4,7 @@
   SRE-BENCH MASTER VERIFICATION & BENCHMARK SCRIPT
   Verifies every feature, function, grader, and spec requirement
   Run: python verify_sre_bench.py
-  Run specific: python verify_sre_bench.py --gate phase1
+  Run specific: python verify_sre_bench.py --gate phase1|phase2|full
 ================================================================================
 """
 import sys, os, json, time, random, argparse, shutil, socket, subprocess, traceback
@@ -58,6 +58,234 @@ class Results:
             self.warned.append(f"{name} score {value:.3f} outside {expected_min}-{expected_max}")
 
 R = Results()
+
+REPO_ROOT = Path(__file__).resolve().parent
+SPACE_INFERENCE_RAW_URL = "https://huggingface.co/spaces/santhakumar-k-2004/sre-bench/raw/main/inference.py"
+
+
+def _print_command_output(result: subprocess.CompletedProcess[str]) -> None:
+    """Print command output snippets to help debugging failures."""
+    if result.stdout:
+        print(f"{DIM}stdout:{RST}\n{result.stdout[-4000:]}")
+    if result.stderr:
+        print(f"{DIM}stderr:{RST}\n{result.stderr[-4000:]}")
+
+
+def _run_subprocess_check(
+    name: str,
+    command: list[str],
+    *,
+    env: Optional[dict[str, str]] = None,
+    timeout: int = 300,
+) -> bool:
+    """Run a subprocess check and record pass/fail."""
+    try:
+        result = subprocess.run(
+            command,
+            cwd=REPO_ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except Exception as exc:
+        R.record(name, False, f"failed to execute command: {exc}")
+        return False
+
+    passed = result.returncode == 0
+    R.record(name, passed, f"exit_code={result.returncode}")
+    if not passed:
+        _print_command_output(result)
+    return passed
+
+
+def _find_free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+def _stop_process(proc: subprocess.Popen[str]) -> None:
+    proc.terminate()
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait(timeout=5)
+
+
+def _phase_gate_summary(title: str) -> int:
+    head(title)
+    total = len(R.passed) + len(R.failed)
+    print(f"\n  {BLD}Checks run:  {total}{RST}")
+    print(f"  {GRN}{BLD}Passed:      {len(R.passed)}{RST}")
+    if R.failed:
+        print(f"  {RED}{BLD}Failed:      {len(R.failed)}{RST}")
+        print(f"\n  {RED}Failed checks:{RST}")
+        for name in R.failed:
+            print(f"    - {name}")
+    return 0 if not R.failed else 1
+
+
+def run_phase1_gate() -> int:
+    """Run phase-1 checks (docker build readiness)."""
+    head("PHASE 1 GATE: Docker Build Creation")
+    dockerfile_path = REPO_ROOT / "Dockerfile"
+    R.record("Dockerfile exists", dockerfile_path.exists(), str(dockerfile_path))
+    if dockerfile_path.exists():
+        dockerfile_text = dockerfile_path.read_text(encoding="utf-8")
+        R.record("Dockerfile exposes port 7860", "EXPOSE 7860" in dockerfile_text, "required by evaluator")
+        R.record(
+            "Dockerfile starts server.app",
+            "server.app" in dockerfile_text,
+            "expected entrypoint present",
+        )
+
+    docker_bin = shutil.which("docker")
+    if not docker_bin:
+        warn("Docker not installed locally. Static Dockerfile checks were executed.")
+    else:
+        _run_subprocess_check(
+            "Docker build succeeds locally",
+            [docker_bin, "build", "-t", "sre-bench-phase1-check", "."],
+            timeout=900,
+        )
+
+    return _phase_gate_summary("PHASE 1 SUMMARY")
+
+
+def run_phase2_gate() -> int:
+    """Run phase-2 checks (inference execution reliability)."""
+    head("PHASE 2 GATE: inference.py Execution")
+    inference_path = REPO_ROOT / "inference.py"
+    text = inference_path.read_text(encoding="utf-8")
+    R.record(
+        "Local inference.py avoids direct raise_for_status",
+        "raise_for_status(" not in text,
+        "reset/step runtime path should be exception-safe",
+    )
+
+    test_env = os.environ.copy()
+    test_env["PYTHONUTF8"] = "1"
+    test_env["PYTHONPATH"] = str(REPO_ROOT)
+    _run_subprocess_check(
+        "Targeted inference/startup regression tests pass",
+        [sys.executable, "-m", "pytest", "-q", "tests/test_inference_contract.py", "tests/test_api_startup.py"],
+        env=test_env,
+        timeout=600,
+    )
+
+    server_proc: Optional[subprocess.Popen[str]] = None
+    try:
+        port = _find_free_port()
+        server_env = os.environ.copy()
+        server_env["PORT"] = str(port)
+        server_env["PYTHONUTF8"] = "1"
+        server_env["PYTHONPATH"] = str(REPO_ROOT)
+        server_proc = subprocess.Popen(
+            [sys.executable, "-m", "server.app"],
+            cwd=REPO_ROOT,
+            env=server_env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+        health_url = f"http://127.0.0.1:{port}/health"
+        ready = False
+        for _ in range(80):
+            if server_proc.poll() is not None:
+                break
+            try:
+                response = httpx.get(health_url, timeout=1.0)
+                if response.status_code == 200:
+                    ready = True
+                    break
+            except Exception:
+                pass
+            time.sleep(0.25)
+
+        if not ready:
+            stdout = server_proc.stdout.read() if server_proc.stdout else ""
+            stderr = server_proc.stderr.read() if server_proc.stderr else ""
+            R.record("server.app starts and serves /health", False, "startup failed")
+            if stdout:
+                print(f"{DIM}server stdout:{RST}\n{stdout[-4000:]}")
+            if stderr:
+                print(f"{DIM}server stderr:{RST}\n{stderr[-4000:]}")
+        else:
+            R.record("server.app starts and serves /health", True, health_url)
+            infer_result = subprocess.run(
+                [
+                    sys.executable,
+                    "inference.py",
+                    "--task",
+                    "task1",
+                    "--seed",
+                    "42",
+                    "--quiet",
+                    "--url",
+                    f"http://127.0.0.1:{port}",
+                ],
+                cwd=REPO_ROOT,
+                env=test_env,
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            lines = [line.strip() for line in infer_result.stdout.splitlines() if line.strip()]
+            inference_ok = (
+                infer_result.returncode == 0
+                and bool(lines)
+                and lines[0].startswith("[START]")
+                and lines[-1].startswith("[END]")
+            )
+            R.record(
+                "inference.py subprocess exits cleanly with structured output",
+                inference_ok,
+                lines[-1] if lines else f"exit_code={infer_result.returncode}",
+            )
+            if not inference_ok:
+                _print_command_output(infer_result)
+    finally:
+        if server_proc is not None:
+            _stop_process(server_proc)
+
+    try:
+        space_resp = httpx.get(SPACE_INFERENCE_RAW_URL, timeout=15.0)
+        space_resp.raise_for_status()
+        space_has_raise = "raise_for_status(" in space_resp.text
+        R.record(
+            "Hugging Face Space inference.py is synced (no stale raise_for_status)",
+            not space_has_raise,
+            "stale code detected on Space main" if space_has_raise else "Space main matches runtime hardening",
+        )
+    except Exception as exc:
+        R.record("Hugging Face Space inference.py is reachable for drift check", False, str(exc))
+
+    return _phase_gate_summary("PHASE 2 SUMMARY")
+
+
+def _parse_cli_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="SRE-Bench verification utility",
+        add_help=True,
+    )
+    parser.add_argument(
+        "--gate",
+        choices=["phase1", "phase2", "full"],
+        default="full",
+        help="Run a targeted verification gate instead of the full suite.",
+    )
+    args, _ = parser.parse_known_args()
+    return args
+
+
+CLI_ARGS = _parse_cli_args()
+if CLI_ARGS.gate == "phase1":
+    sys.exit(run_phase1_gate())
+if CLI_ARGS.gate == "phase2":
+    sys.exit(run_phase2_gate())
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  SECTION 1 — PYDANTIC MODELS

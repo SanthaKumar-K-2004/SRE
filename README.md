@@ -22,6 +22,7 @@ It simulates the full incident lifecycle:
 - [Quick Start](#quick-start)
 - [Pre-Submission Checklist (5/5)](#pre-submission-checklist-55)
 - [Run Full Project Verification](#run-full-project-verification)
+- [GitHub to Hugging Face Sync](#github-to-hugging-face-sync)
 - [API Reference](#api-reference)
 - [Action Space](#action-space)
 - [Tasks and Scoring](#tasks-and-scoring)
@@ -154,6 +155,32 @@ Bash:
 ```bash
 PYTHONUTF8=1 PYTHONPATH=. python verify_sre_bench.py
 ```
+
+Targeted gate checks:
+
+```bash
+PYTHONUTF8=1 PYTHONPATH=. python verify_sre_bench.py --gate phase1
+PYTHONUTF8=1 PYTHONPATH=. python verify_sre_bench.py --gate phase2
+```
+
+## GitHub to Hugging Face Sync
+
+To prevent GitHub/Space drift, this repo uses `.github/workflows/sync-space.yml`:
+
+1. Push to `main`.
+2. Workflow runs `pytest -q` and `python verify_sre_bench.py`.
+3. If both pass, workflow mirrors `main` to `https://huggingface.co/spaces/santhakumar-k-2004/sre-bench` using `--force-with-lease`.
+
+Required repository secret:
+
+- `HF_SPACE_WRITE_TOKEN`: Hugging Face token with write access to `santhakumar-k-2004/sre-bench`.
+
+Submission flow (recommended):
+
+1. `git push origin main`
+2. Wait for GitHub Actions job `sync-space` to succeed.
+3. Verify Space code is updated at `https://huggingface.co/spaces/santhakumar-k-2004/sre-bench/raw/main/inference.py`.
+4. Submit in the evaluator.
 
 ## API Reference
 
