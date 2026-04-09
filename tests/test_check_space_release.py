@@ -54,6 +54,55 @@ def test_ensure_raw_inference_is_hardened_rejects_stale_code() -> None:
         client.close()
 
 
+def test_ensure_raw_manifest_has_three_task_graders_accepts_valid_manifest() -> None:
+    manifest = """
+name: sre-bench
+tasks:
+  - id: task1
+    grader: tasks.manifest_graders:grade_task1_manifest
+  - id: task2
+    grader: tasks.manifest_graders:grade_task2_manifest
+  - id: task3
+    grader: tasks.manifest_graders:grade_task3_manifest
+"""
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text=manifest)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), timeout=release_check.HTTP_TIMEOUT)
+    try:
+        release_check.ensure_raw_manifest_has_three_task_graders(
+            client,
+            "https://huggingface.co/spaces/example/raw/main/openenv.yaml",
+        )
+    finally:
+        client.close()
+
+
+def test_ensure_raw_manifest_has_three_task_graders_rejects_bad_manifest() -> None:
+    manifest = """
+name: sre-bench
+tasks:
+  - id: task1
+    grader: tasks.manifest_graders.grade_task1_manifest
+  - id: task2
+    grader: tasks.manifest_graders.grade_task2_manifest
+"""
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text=manifest)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), timeout=release_check.HTTP_TIMEOUT)
+    try:
+        with pytest.raises(RuntimeError, match="at least 3 grader declarations"):
+            release_check.ensure_raw_manifest_has_three_task_graders(
+                client,
+                "https://huggingface.co/spaces/example/raw/main/openenv.yaml",
+            )
+    finally:
+        client.close()
+
+
 def test_run_remote_smoke_accepts_structured_output(monkeypatch: pytest.MonkeyPatch) -> None:
     def fake_run(*_args, **_kwargs) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(

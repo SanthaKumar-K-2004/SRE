@@ -348,6 +348,23 @@ class SREBenchOpenEnv:
     """
 
     task_ids = ["task1", "task2", "task3"]
+    tasks = [
+        {
+            "id": "task1",
+            "difficulty": "easy",
+            "grader": "tasks.manifest_graders:grade_task1_manifest",
+        },
+        {
+            "id": "task2",
+            "difficulty": "medium",
+            "grader": "tasks.manifest_graders:grade_task2_manifest",
+        },
+        {
+            "id": "task3",
+            "difficulty": "hard",
+            "grader": "tasks.manifest_graders:grade_task3_manifest",
+        },
+    ]
 
     def __init__(self, data_path: Optional[str] = None):
         self._env = SREBenchEnv(data_path=data_path)
@@ -378,6 +395,10 @@ class SREBenchOpenEnv:
     def state(self) -> Dict[str, Any]:
         """Return raw dict state from the wrapped environment."""
         return self._env.state()
+
+    def list_tasks(self) -> List[Dict[str, str]]:
+        """Return task metadata for validators that inspect runtime task registries."""
+        return [task.copy() for task in self.tasks]
 
     def close(self) -> None:
         """Release resources held by the wrapped environment."""

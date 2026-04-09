@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 import time
@@ -16,6 +17,7 @@ import httpx
 REPO_ROOT = Path(__file__).resolve().parent
 DEFAULT_SPACE_URL = "https://santhakumar-k-2004-sre-bench.hf.space"
 DEFAULT_RAW_URL = "https://huggingface.co/spaces/santhakumar-k-2004/sre-bench/raw/main/inference.py"
+DEFAULT_RAW_MANIFEST_URL = "https://huggingface.co/spaces/santhakumar-k-2004/sre-bench/raw/main/openenv.yaml"
 DEFAULT_HEALTH_TIMEOUT_SECONDS = 900.0
 DEFAULT_POLL_SECONDS = 5.0
 HTTP_TIMEOUT = httpx.Timeout(20.0, connect=10.0)
@@ -73,6 +75,34 @@ def ensure_raw_inference_is_hardened(client: httpx.Client, raw_url: str) -> None
     print(f"[PASS] Space raw inference.py is hardened: {raw_url}")
 
 
+def ensure_raw_manifest_has_three_task_graders(client: httpx.Client, manifest_url: str) -> None:
+    """Ensure the deployed manifest advertises >=3 tasks with grader references."""
+    response = client.get(manifest_url)
+    response.raise_for_status()
+    content = response.text
+
+    grader_values = []
+    for line in content.splitlines():
+        match = re.match(r"^\s*grader:\s*(.+?)\s*$", line)
+        if match:
+            grader_values.append(match.group(1).strip().strip('"').strip("'"))
+
+    if len(grader_values) < 3:
+        raise RuntimeError(
+            "Space openenv.yaml does not contain at least 3 grader declarations. "
+            f"Found {len(grader_values)} in {manifest_url}"
+        )
+
+    invalid = [value for value in grader_values if ":" not in value]
+    if invalid:
+        raise RuntimeError(
+            "Space openenv.yaml contains grader references missing module:function format: "
+            + ", ".join(invalid)
+        )
+
+    print(f"[PASS] Space openenv.yaml has {len(grader_values)} task graders: {manifest_url}")
+
+
 def run_remote_smoke(
     *,
     python_executable: str,
@@ -128,6 +158,11 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Validate live Hugging Face Space submission readiness.")
     parser.add_argument("--space-url", default=DEFAULT_SPACE_URL, help="Base URL for the deployed Space.")
     parser.add_argument("--raw-url", default=DEFAULT_RAW_URL, help="Raw main-branch inference.py URL.")
+    parser.add_argument(
+        "--manifest-url",
+        default=DEFAULT_RAW_MANIFEST_URL,
+        help="Raw main-branch openenv.yaml URL.",
+    )
     parser.add_argument("--health-timeout", type=float, default=DEFAULT_HEALTH_TIMEOUT_SECONDS)
     parser.add_argument("--poll-seconds", type=float, default=DEFAULT_POLL_SECONDS)
     parser.add_argument("--task", default="task1", choices=["task1", "task2", "task3"])
@@ -147,6 +182,7 @@ def main() -> int:
             poll_seconds=args.poll_seconds,
         )
         ensure_raw_inference_is_hardened(client, args.raw_url)
+        ensure_raw_manifest_has_three_task_graders(client, args.manifest_url)
 
     run_remote_smoke(
         python_executable=sys.executable,

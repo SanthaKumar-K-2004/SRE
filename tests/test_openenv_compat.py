@@ -41,6 +41,20 @@ def test_manifest_entrypoint_reset_and_step_contract():
         env.close()
 
 
+def test_manifest_entrypoint_exposes_three_tasks_with_graders():
+    env_cls = _load_manifest_entrypoint_class()
+    env = env_cls()
+
+    try:
+        tasks = env.list_tasks() if hasattr(env, "list_tasks") else getattr(env, "tasks", [])
+        assert isinstance(tasks, list)
+        assert len(tasks) >= 3
+        assert {"task1", "task2", "task3"}.issubset({task.get("id") for task in tasks})
+        assert all("grader" in task for task in tasks[:3])
+    finally:
+        env.close()
+
+
 def test_terminal_info_includes_grader_score_with_final_score_parity():
     env_cls = _load_manifest_entrypoint_class()
     env = env_cls()

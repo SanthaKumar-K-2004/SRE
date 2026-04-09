@@ -11,22 +11,25 @@ models:
 tasks:
   - id: task1
     name: Alert Classification
+    description: Classify incident type, severity, and primary faulty service.
     difficulty: easy
     max_steps: 1
     expected_score_range: [0.75, 0.90]
-    grader: tasks.manifest_graders.grade_task1_manifest
+    grader: tasks.manifest_graders:grade_task1_manifest
   - id: task2
     name: Root Cause Analysis
+    description: Identify likely root cause, trigger service, and affected chain.
     difficulty: medium
     max_steps: 8
     expected_score_range: [0.40, 0.60]
-    grader: tasks.manifest_graders.grade_task2_manifest
+    grader: tasks.manifest_graders:grade_task2_manifest
   - id: task3
     name: Full Remediation
+    description: Execute diagnose-remediate-verify-resolve sequence.
     difficulty: hard
     max_steps: 15
     expected_score_range: [0.15, 0.30]
-    grader: tasks.manifest_graders.grade_task3_manifest
+    grader: tasks.manifest_graders:grade_task3_manifest
 
 action_space:
   type: categorical
