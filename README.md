@@ -185,9 +185,10 @@ To prevent GitHub/Space drift, this repo uses `.github/workflows/sync-space.yml`
 2. Workflow runs `pytest -q` and `python verify_sre_bench.py`.
 3. If both pass, workflow mirrors `main` to `https://huggingface.co/spaces/santhakumar-k-2004/sre-bench` using `--force-with-lease`.
 
-Required repository secret:
+Required repository secret (one of the following):
 
-- `HF_SPACE_WRITE_TOKEN`: Hugging Face token with write access to `santhakumar-k-2004/sre-bench`.
+- `HF_SPACE_WRITE_TOKEN` (preferred): Hugging Face token with write access to `santhakumar-k-2004/sre-bench`.
+- `HF_TOKEN` (fallback): same write access; used only when `HF_SPACE_WRITE_TOKEN` is not configured.
 
 Submission flow (recommended):
 

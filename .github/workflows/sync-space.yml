@@ -41,22 +41,40 @@ jobs:
           pytest -q
           python verify_sre_bench.py
 
-      - name: Ensure Hugging Face token is configured
+      - name: Resolve Hugging Face write token
+        env:
+          HF_SPACE_WRITE_TOKEN: ${{ secrets.HF_SPACE_WRITE_TOKEN }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          if [ -z "${{ secrets.HF_SPACE_WRITE_TOKEN }}" ]; then
-            echo "Missing required secret: HF_SPACE_WRITE_TOKEN"
+          set -euo pipefail
+          token=""
+          source_name=""
+          if [ -n "${HF_SPACE_WRITE_TOKEN}" ]; then
+            token="${HF_SPACE_WRITE_TOKEN}"
+            source_name="HF_SPACE_WRITE_TOKEN"
+          elif [ -n "${HF_TOKEN}" ]; then
+            token="${HF_TOKEN}"
+            source_name="HF_TOKEN"
+          fi
+
+          if [ -z "${token}" ]; then
+            echo "Missing required secret: set HF_SPACE_WRITE_TOKEN (preferred) or HF_TOKEN."
             exit 1
           fi
 
+          echo "::add-mask::${token}"
+          echo "HF_SYNC_TOKEN=${token}" >> "${GITHUB_ENV}"
+          echo "Using Hugging Face token from ${source_name}."
+
       - name: Sync GitHub main to Hugging Face Space main
         env:
-          HF_SPACE_WRITE_TOKEN: ${{ secrets.HF_SPACE_WRITE_TOKEN }}
+          HF_SYNC_TOKEN: ${{ env.HF_SYNC_TOKEN }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git remote remove hf-space 2>/dev/null || true
-          git remote add hf-space "https://x-access-token:${HF_SPACE_WRITE_TOKEN}@huggingface.co/spaces/santhakumar-k-2004/sre-bench"
+          git remote add hf-space "https://x-access-token:${HF_SYNC_TOKEN}@huggingface.co/spaces/santhakumar-k-2004/sre-bench"
           git fetch hf-space main || true
 
           expected=""
