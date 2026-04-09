@@ -190,6 +190,8 @@ Required repository secret (one of the following):
 - `HF_SPACE_WRITE_TOKEN` (preferred): Hugging Face token with write access to `santhakumar-k-2004/sre-bench`.
 - `HF_TOKEN` (fallback): same write access; used only when `HF_SPACE_WRITE_TOKEN` is not configured.
 
+If neither secret is configured, the workflow still runs validation but skips Space sync and emits a warning.
+
 Submission flow (recommended):
 
 1. Run local gates: `pytest -q`, `python verify_sre_bench.py --gate phase1`, `python verify_sre_bench.py --gate phase2`, `python verify_sre_bench.py`.

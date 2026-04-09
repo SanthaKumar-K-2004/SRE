@@ -58,15 +58,23 @@ jobs:
           fi
 
           if [ -z "${token}" ]; then
-            echo "Missing required secret: set HF_SPACE_WRITE_TOKEN (preferred) or HF_TOKEN."
-            exit 1
+            echo "SYNC_ENABLED=false" >> "${GITHUB_ENV}"
+            echo "::warning::Missing Hugging Face write token. Set HF_SPACE_WRITE_TOKEN (preferred) or HF_TOKEN to enable automatic Space sync."
+            exit 0
           fi
 
           echo "::add-mask::${token}"
           echo "HF_SYNC_TOKEN=${token}" >> "${GITHUB_ENV}"
+          echo "SYNC_ENABLED=true" >> "${GITHUB_ENV}"
           echo "Using Hugging Face token from ${source_name}."
 
+      - name: Skip notice when sync token is unavailable
+        if: env.SYNC_ENABLED != 'true'
+        run: |
+          echo "Space sync skipped because no Hugging Face write token secret is configured."
+
       - name: Sync GitHub main to Hugging Face Space main
+        if: env.SYNC_ENABLED == 'true'
         env:
           HF_SYNC_TOKEN: ${{ env.HF_SYNC_TOKEN }}
         run: |
@@ -89,6 +97,7 @@ jobs:
           fi
 
       - name: Verify live Space release readiness
+        if: env.SYNC_ENABLED == 'true'
         env:
           PYTHONUTF8: "1"
           PYTHONPATH: "."
