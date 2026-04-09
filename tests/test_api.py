@@ -107,6 +107,10 @@ class TestResetEndpoint:
         response = client.post("/reset", json={"task": "task1", "seed": 0})
         assert response.status_code == 200
 
+    def test_reset_accepts_task_id_alias(self, client):
+        response = client.post("/reset", json={"task_id": "task1", "seed": 0})
+        assert response.status_code == 200
+
     def test_reset_returns_observation(self, client):
         response = client.post("/reset", json={"task": "task1", "seed": 0})
         data = response.json()
@@ -226,6 +230,7 @@ class TestStepEndpoint:
 
         assert last_response["done"] is True
         assert "final_score" in last_response["info"]
+        assert "grader_score" in last_response["info"]
 
 
 class TestStateEndpoint:

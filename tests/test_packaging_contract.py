@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 import tomllib
 
+import yaml
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -26,3 +28,20 @@ def test_pyproject_contains_openenv_dependency_and_server_script() -> None:
 
     assert any(dep.startswith("openenv") and not dep.startswith("openenv-core") for dep in deps)
     assert scripts.get("server") == "server.app:main"
+
+
+def test_openenv_manifest_contains_entrypoint_models_and_graders() -> None:
+    manifest_path = REPO_ROOT / "openenv.yaml"
+    manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+
+    assert manifest.get("entrypoint") == "environment.py:SREBenchOpenEnv"
+
+    models = manifest.get("models", {})
+    assert models.get("observation") == "models.SREObservation"
+    assert models.get("action") == "models.SREAction"
+    assert models.get("reward") == "models.SREReward"
+
+    task_map = {task.get("id"): task for task in manifest.get("tasks", [])}
+    assert task_map["task1"]["grader"] == "tasks.manifest_graders.grade_task1_manifest"
+    assert task_map["task2"]["grader"] == "tasks.manifest_graders.grade_task2_manifest"
+    assert task_map["task3"]["grader"] == "tasks.manifest_graders.grade_task3_manifest"

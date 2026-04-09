@@ -1,6 +1,12 @@
 name: sre-bench
 version: "1.0.0"
 description: Deterministic RL environment for SRE on-call incident response.
+entrypoint: environment.py:SREBenchOpenEnv
+
+models:
+  observation: models.SREObservation
+  action: models.SREAction
+  reward: models.SREReward
 
 tasks:
   - id: task1
@@ -8,16 +14,19 @@ tasks:
     difficulty: easy
     max_steps: 1
     expected_score_range: [0.75, 0.90]
+    grader: tasks.manifest_graders.grade_task1_manifest
   - id: task2
     name: Root Cause Analysis
     difficulty: medium
     max_steps: 8
     expected_score_range: [0.40, 0.60]
+    grader: tasks.manifest_graders.grade_task2_manifest
   - id: task3
     name: Full Remediation
     difficulty: hard
     max_steps: 15
     expected_score_range: [0.15, 0.30]
+    grader: tasks.manifest_graders.grade_task3_manifest
 
 action_space:
   type: categorical

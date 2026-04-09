@@ -169,6 +169,7 @@ class SREBenchEnv:
                 info={
                     "message": "Max steps reached",
                     "final_score": final_score,
+                    "grader_score": final_score,
                     "steps_used": self._state_machine.state.step_count,
                 },
             )
@@ -217,7 +218,9 @@ class SREBenchEnv:
         }
 
         if done:
-            info["final_score"] = self._compute_final_score()
+            final_score = self._compute_final_score()
+            info["final_score"] = final_score
+            info["grader_score"] = final_score
             info["reward_breakdown"] = self._reward_engine.get_reward_breakdown()
 
         return SREReward(
@@ -332,3 +335,50 @@ class SREBenchEnv:
             if state.logs_inspected
             else "",
         }
+
+
+class SREBenchOpenEnv:
+    """
+    Compatibility wrapper exposing an OpenEnv-style contract from SREBenchEnv.
+
+    This class exists to satisfy validators that expect:
+      - task_ids metadata
+      - reset(task_id=...)
+      - step(action) -> (observation, reward, done, info)
+    """
+
+    task_ids = ["task1", "task2", "task3"]
+
+    def __init__(self, data_path: Optional[str] = None):
+        self._env = SREBenchEnv(data_path=data_path)
+
+    def reset(self, task_id: str = "task1", seed: Optional[int] = None) -> SREObservation:
+        """Reset using task_id naming expected by some validators."""
+        return self._env.reset(task=task_id, seed=seed)
+
+    def step(self, action: SREAction) -> tuple[SREObservation, SREReward, bool, Dict[str, Any]]:
+        """
+        Execute one step and return OpenEnv-style tuple payload.
+
+        The wrapped env already computes final_score; expose grader_score parity
+        in terminal info for compatibility checks.
+        """
+        reward = self._env.step(action)
+        observation = self._env._build_observation()
+        info = dict(reward.info)
+
+        if reward.done and "final_score" in info:
+            final_score = open_interval_score(float(info["final_score"]))
+            info["final_score"] = final_score
+            info["grader_score"] = final_score
+            reward = reward.model_copy(update={"info": info})
+
+        return observation, reward, bool(reward.done), info
+
+    def state(self) -> Dict[str, Any]:
+        """Return raw dict state from the wrapped environment."""
+        return self._env.state()
+
+    def close(self) -> None:
+        """Release resources held by the wrapped environment."""
+        self._env.close()

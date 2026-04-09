@@ -8,7 +8,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 # ─── Enums ──────────────────────────────────────────────────────────────────────
@@ -172,7 +172,20 @@ class ResetRequest(BaseModel):
     """Request body for POST /reset."""
 
     task: TaskType = TaskType.TASK1
+    task_id: Optional[TaskType] = None
     seed: Optional[int] = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def _normalize_task_alias(self) -> "ResetRequest":
+        """
+        Accept both `task` and `task_id` without changing existing callers.
+
+        If `task_id` is provided, it takes precedence for compatibility with
+        validator/client payloads that send only `task_id`.
+        """
+        if self.task_id is not None:
+            self.task = self.task_id
+        return self
 
 
 class HealthResponse(BaseModel):
