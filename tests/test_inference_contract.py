@@ -89,6 +89,66 @@ def api_server_url() -> str:
             proc.kill()
 
 
+@pytest.fixture
+def server_entrypoint_url() -> str:
+    """Start the canonical server entrypoint used by deployment smoke checks."""
+    port = _find_free_port()
+    env = os.environ.copy()
+    env["PORT"] = str(port)
+    env["PYTHONPATH"] = "."
+    env["PYTHONUTF8"] = "1"
+
+    proc = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "server.app",
+        ],
+        cwd=REPO_ROOT,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+    health_url = f"http://127.0.0.1:{port}/health"
+    started = False
+    for _ in range(60):
+        if proc.poll() is not None:
+            break
+        try:
+            response = httpx.get(health_url, timeout=1.0)
+            if response.status_code == 200:
+                started = True
+                break
+        except Exception:
+            pass
+        time.sleep(0.25)
+
+    if not started:
+        stdout = proc.stdout.read() if proc.stdout is not None else ""
+        stderr = proc.stderr.read() if proc.stderr is not None else ""
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+        pytest.fail(
+            "Failed to start server.app entrypoint for inference smoke test.\n"
+            f"stdout:\n{stdout}\n\nstderr:\n{stderr}"
+        )
+
+    try:
+        yield f"http://127.0.0.1:{port}"
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+
 def _make_observation(
     title: str,
     service: str = "api-gateway",
@@ -232,6 +292,30 @@ def test_reset_retries_transient_failure(monkeypatch: pytest.MonkeyPatch) -> Non
     assert calls["reset"] == 2
 
 
+def test_reset_handles_connection_errors_without_crashing(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = {"reset": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/health":
+            return httpx.Response(200, json={"status": "ok"})
+        if request.url.path == "/reset":
+            calls["reset"] += 1
+            raise httpx.ConnectError("connection refused", request=request)
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    monkeypatch.setattr(inference_module.time, "sleep", lambda *_args, **_kwargs: None)
+    agent = _make_mock_agent(handler)
+    try:
+        result = agent.reset_episode("task1", seed=11)
+    finally:
+        agent.close()
+
+    assert result["ok"] is False
+    assert result["error"] == "REQUEST_ERROR"
+    assert "ConnectError" in result["message"]
+    assert calls["reset"] == inference_module.MAX_RETRIES
+
+
 def test_reset_failure_emits_start_and_end_without_crashing(monkeypatch: pytest.MonkeyPatch) -> None:
     port = _find_free_port()
 
@@ -295,6 +379,38 @@ def test_reset_failure_emits_start_and_end_without_crashing(monkeypatch: pytest.
     assert result.returncode == 0
     assert lines[0].startswith("[START]")
     assert lines[-1] == "[END] success=false steps=0 score=0.00 rewards=0.00"
+
+
+def test_server_entrypoint_smoke_runs_inference_without_crashing(server_entrypoint_url: str) -> None:
+    env = os.environ.copy()
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONPATH"] = "."
+    env.pop("HF_TOKEN", None)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "inference.py",
+            "--task",
+            "task1",
+            "--seed",
+            "42",
+            "--quiet",
+            "--url",
+            server_entrypoint_url,
+        ],
+        cwd=REPO_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=True,
+    )
+
+    lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    assert result.returncode == 0
+    assert lines[0].startswith("[START]")
+    assert lines[-1].startswith("[END]")
 
 
 def test_title_based_family_inference_ignores_red_herring_logs() -> None:

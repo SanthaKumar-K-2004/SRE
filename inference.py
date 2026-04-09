@@ -34,6 +34,12 @@ TASK_STEP_LIMITS = {
     "task3": 15,
 }
 TRANSIENT_HTTP_STATUSES = {408, 425, 429, 500, 502, 503, 504}
+RETRYABLE_RESPONSE_ERRORS = {
+    "INVALID_JSON",
+    "RESPONSE_READ_ERROR",
+    "REQUEST_ERROR",
+    "UNEXPECTED_RESPONSE_ERROR",
+}
 READINESS_TIMEOUT_SECONDS = 90.0
 READINESS_POLL_SECONDS = 1.0
 HTTP_TIMEOUT = httpx.Timeout(10.0, connect=5.0)
@@ -235,7 +241,10 @@ def _emit_failure_end() -> None:
 
 def _response_snippet(response: httpx.Response) -> str:
     """Return a compact response body preview for diagnostics."""
-    body = response.text.strip().replace("\n", " ").replace("\r", " ")
+    try:
+        body = response.text.strip().replace("\n", " ").replace("\r", " ")
+    except Exception as exc:
+        return f"unavailable_response_body({exc.__class__.__name__}: {exc})"
     return body[:200] or response.reason_phrase or "empty_response"
 
 
@@ -464,27 +473,27 @@ class SREAgent:
 
         while time.monotonic() < deadline:
             attempts += 1
-            try:
-                response = self.client.get(f"{self.api_url}/health")
-                if response.status_code == 200:
-                    return {"ok": True, "attempts": attempts}
+            health_result = self._request_json(
+                "GET",
+                "/health",
+                retries=1,
+                retry_statuses=set(),
+            )
+            if health_result.get("ok"):
+                return {"ok": True, "attempts": attempts}
 
-                snippet = _response_snippet(response)
-                last_error = f"HTTP {response.status_code}: {snippet}"
-                if response.status_code not in TRANSIENT_HTTP_STATUSES:
-                    return {
-                        "ok": False,
-                        "error": f"HTTP_{response.status_code}",
-                        "message": f"Health check failed: {snippet}",
-                        "status_code": response.status_code,
-                    }
+            last_error = str(health_result.get("message", "environment_not_ready"))
+            error_code = str(health_result.get("error", "REQUEST_ERROR"))
+            status_code = health_result.get("status_code")
+            is_retryable = (
+                status_code in TRANSIENT_HTTP_STATUSES
+                or error_code in RETRYABLE_RESPONSE_ERRORS
+            )
+            if not is_retryable:
+                return health_result
 
-                self._log(
-                    f"[WARN] /health not ready (attempt {attempts}, status={response.status_code}): {snippet}"
-                )
-            except httpx.RequestError as exc:
-                last_error = f"{exc.__class__.__name__}: {exc}"
-                self._log(f"[WARN] /health request failed (attempt {attempts}): {last_error}")
+            status_label = status_code if status_code is not None else error_code
+            self._log(f"[WARN] /health not ready (attempt {attempts}, status={status_label}): {last_error}")
 
             time.sleep(READINESS_POLL_SECONDS)
 
@@ -500,20 +509,24 @@ class SREAgent:
         method: str,
         path: str,
         json_payload: Optional[Dict[str, Any]] = None,
+        retries: int = MAX_RETRIES,
+        retry_statuses: Optional[set[int]] = None,
     ) -> Dict[str, Any]:
         """Make a JSON request with retries and structured error handling."""
         url = f"{self.api_url}{path}"
         last_error = "request_failed"
+        attempts = max(1, retries)
+        effective_retry_statuses = TRANSIENT_HTTP_STATUSES if retry_statuses is None else retry_statuses
 
-        for attempt in range(MAX_RETRIES):
+        for attempt in range(attempts):
             try:
                 response = self.client.request(method, url, json=json_payload)
             except httpx.RequestError as exc:
                 last_error = f"{exc.__class__.__name__}: {exc}"
-                if attempt < MAX_RETRIES - 1:
+                if attempt < attempts - 1:
                     delay = RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)]
                     self._log(
-                        f"[WARN] {method} {path} failed (attempt {attempt + 1}/{MAX_RETRIES}): {last_error}. "
+                        f"[WARN] {method} {path} failed (attempt {attempt + 1}/{attempts}): {last_error}. "
                         f"Retrying in {delay}s."
                     )
                     time.sleep(delay)
@@ -522,6 +535,13 @@ class SREAgent:
                     "ok": False,
                     "error": "REQUEST_ERROR",
                     "message": f"{method} {path} failed: {last_error}",
+                    "status_code": None,
+                }
+            except Exception as exc:
+                return {
+                    "ok": False,
+                    "error": "REQUEST_ERROR",
+                    "message": f"{method} {path} failed: {exc.__class__.__name__}: {exc}",
                     "status_code": None,
                 }
 
@@ -539,13 +559,20 @@ class SREAgent:
                         "message": f"{method} {path} returned invalid JSON: {exc}",
                         "status_code": response.status_code,
                     }
+                except Exception as exc:
+                    return {
+                        "ok": False,
+                        "error": "UNEXPECTED_RESPONSE_ERROR",
+                        "message": f"{method} {path} response parsing failed: {exc.__class__.__name__}: {exc}",
+                        "status_code": response.status_code,
+                    }
 
             snippet = _response_snippet(response)
             last_error = f"HTTP {response.status_code}: {snippet}"
-            if response.status_code in TRANSIENT_HTTP_STATUSES and attempt < MAX_RETRIES - 1:
+            if response.status_code in effective_retry_statuses and attempt < attempts - 1:
                 delay = RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)]
                 self._log(
-                    f"[WARN] {method} {path} returned {response.status_code} (attempt {attempt + 1}/{MAX_RETRIES}): "
+                    f"[WARN] {method} {path} returned {response.status_code} (attempt {attempt + 1}/{attempts}): "
                     f"{snippet}. Retrying in {delay}s."
                 )
                 time.sleep(delay)
@@ -561,7 +588,7 @@ class SREAgent:
         return {
             "ok": False,
             "error": "REQUEST_ERROR",
-            "message": f"{method} {path} failed after {MAX_RETRIES} attempts: {last_error}",
+            "message": f"{method} {path} failed after {attempts} attempts: {last_error}",
             "status_code": None,
         }
 
