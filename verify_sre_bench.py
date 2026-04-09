@@ -635,6 +635,11 @@ R.record("After restart: remediation_applied=True", sm2.state["remediation_appli
 # ══════════════════════════════════════════════════════════════════════════════
 head("SECTION 4: All Three Graders")
 
+
+def open_interval_score(score: float) -> float:
+    """Normalize synthetic grader scores to strict-open interval for validation parity."""
+    return round(min(0.99, max(0.01, score)), 4)
+
 # ── Task 1 grader ─────────────────────────────────────────────────────────────
 def grade_task1(action_params, gold_incident):
     """Task 1: Alert classification grader — deterministic enum matching"""
@@ -652,7 +657,7 @@ def grade_task1(action_params, gold_incident):
     gold_services = set(gold_incident["gold_affected_chain"])
     if action_params.get("primary_fault_service") in gold_services:
         score += 0.25
-    return round(min(1.0, max(0.0, score)), 4)
+    return open_interval_score(score)
 
 sub("Task 1 — Alert Classification grader")
 easy_inc = INCIDENTS[0]  # resource_exhaustion, easy
@@ -663,7 +668,7 @@ perfect_t1 = grade_task1({
     "severity": easy_inc["alert_payload"]["severity"],
     "primary_fault_service": "redis-cache"
 }, easy_inc)
-R.record("Task1: Perfect answer scores 1.0", perfect_t1 == 1.0, f"got {perfect_t1}")
+R.record("Task1: Perfect answer scores 0.99", perfect_t1 == 0.99, f"got {perfect_t1}")
 
 # Partial — only incident type correct
 partial_t1 = grade_task1({"incident_type": easy_inc["incident_type"], "severity": "p4", "primary_fault_service": "postgres"}, easy_inc)
@@ -671,16 +676,16 @@ R.record("Task1: Partial credit (type only) = 0.40", partial_t1 == 0.40, f"got {
 
 # Wrong everything
 zero_t1 = grade_task1({"incident_type": "network_partition", "severity": "p4", "primary_fault_service": "frontend"}, easy_inc)
-R.record("Task1: All wrong = 0.0", zero_t1 == 0.0, f"got {zero_t1}")
+R.record("Task1: All wrong = 0.01", zero_t1 == 0.01, f"got {zero_t1}")
 
-# Score in range [0,1]
+# Score in strict-open range (0,1)
 for i, inc in enumerate(INCIDENTS[:8]):
     s = grade_task1({"incident_type": inc["incident_type"], "severity": "p1", "primary_fault_service": "redis-cache"}, inc)
-    if not 0.0 <= s <= 1.0:
+    if not 0.0 < s < 1.0:
         R.record(f"Task1 grader range safe (easy {i})", False, f"got {s}")
         break
 else:
-    R.record("Task1 grader always returns [0.0, 1.0]", True, "8 incidents tested")
+    R.record("Task1 grader always returns (0, 1)", True, "8 incidents tested")
 
 # ── Task 2 grader ─────────────────────────────────────────────────────────────
 def grade_task2(action_params, gold_incident, steps_taken):
@@ -701,7 +706,7 @@ def grade_task2(action_params, gold_incident, steps_taken):
         score += 0.10  # efficiency bonus
     # penalize wasted steps
     score -= max(0, steps_taken - 5) * 0.05
-    return round(min(1.0, max(0.0, score)), 4)
+    return open_interval_score(score)
 
 sub("Task 2 — Root Cause Analysis grader")
 med_inc = INCIDENTS[8]  # medium incident
@@ -711,21 +716,21 @@ perfect_t2 = grade_task2({
     "triggered_by": med_inc["gold_triggered_by"],
     "affected_chain": med_inc["gold_affected_chain"]
 }, med_inc, steps_taken=4)
-R.record("Task2: Perfect + efficient = 1.0", perfect_t2 == 1.0, f"got {perfect_t2}")
+R.record("Task2: Perfect + efficient = 0.99", perfect_t2 == 0.99, f"got {perfect_t2}")
 
 partial_t2 = grade_task2({"root_cause": med_inc["gold_root_cause"], "triggered_by": "wrong", "affected_chain": ["redis-cache"]}, med_inc, steps_taken=6)
 R.record("Task2: Root cause only = ~0.40", 0.35 <= partial_t2 <= 0.50, f"got {partial_t2}")
 
 zero_t2 = grade_task2({"root_cause": "wrong_type", "triggered_by": "wrong", "affected_chain": []}, med_inc, steps_taken=10)
-R.record("Task2: All wrong = 0.0", zero_t2 == 0.0, f"got {zero_t2}")
+R.record("Task2: All wrong = 0.01", zero_t2 == 0.01, f"got {zero_t2}")
 
 for i, inc in enumerate(INCIDENTS[8:16]):
     s = grade_task2({"root_cause": inc["gold_root_cause"], "triggered_by": "x", "affected_chain": []}, inc, steps_taken=random.randint(2,10))
-    if not 0.0 <= s <= 1.0:
+    if not 0.0 < s < 1.0:
         R.record(f"Task2 grader range safe (medium {i})", False, f"got {s}")
         break
 else:
-    R.record("Task2 grader always returns [0.0, 1.0]", True, "8 incidents tested")
+    R.record("Task2 grader always returns (0, 1)", True, "8 incidents tested")
 
 # ── Task 3 grader ─────────────────────────────────────────────────────────────
 def lcs_length(a, b):
@@ -744,7 +749,7 @@ def grade_task3(agent_sequence, gold_incident, state_machine_state):
     """Task 3: State machine remediation — LCS sequence scoring"""
     gold = gold_incident["gold_action_sequence"]
     if not gold:
-        return 0.0
+        return open_interval_score(0.0)
 
     # Base: LCS fraction
     lcs = lcs_length(agent_sequence, gold)
@@ -773,7 +778,7 @@ def grade_task3(agent_sequence, gold_incident, state_machine_state):
     consecutive_repeats = sum(1 for i in range(1,len(agent_sequence)) if agent_sequence[i]==agent_sequence[i-1])
     score -= consecutive_repeats * 0.10
 
-    return round(min(1.0, max(0.0, score)), 4)
+    return open_interval_score(score)
 
 sub("Task 3 — Full Remediation grader (LCS state machine)")
 hard_inc = INCIDENTS[16]
@@ -781,16 +786,16 @@ gold_seq = hard_inc["gold_action_sequence"]
 
 # Perfect sequence
 perfect_t3 = grade_task3(gold_seq, hard_inc, {})
-R.record("Task3: Perfect gold sequence = 1.0", perfect_t3 >= 0.95, f"got {perfect_t3}")
+R.record("Task3: Perfect gold sequence = 0.99", perfect_t3 == 0.99, f"got {perfect_t3}")
 
 # Partially correct sequence
 partial_seq = gold_seq[:3] + ["wrong_action", "wrong_action2"] + gold_seq[3:]
 partial_t3 = grade_task3(partial_seq, hard_inc, {})
-R.record("Task3: Partial sequence gives partial credit", partial_t3 >= 0.0, f"got {partial_t3}")
+R.record("Task3: Partial sequence gives partial credit", 0.0 < partial_t3 < 1.0, f"got {partial_t3}")
 
 # Empty sequence
 zero_t3 = grade_task3([], hard_inc, {})
-R.record("Task3: Empty sequence = 0.0", zero_t3 == 0.0, f"got {zero_t3}")
+R.record("Task3: Empty sequence = 0.01", zero_t3 == 0.01, f"got {zero_t3}")
 
 # Loop penalty test
 loop_seq = gold_seq[:2] + ["inspect_logs:redis", "inspect_logs:redis", "inspect_logs:redis"]
@@ -806,11 +811,11 @@ R.record("Task3: Destructive-before-diagnose penalty", dest_t3 < clean_t3, f"pen
 for i, inc in enumerate(INCIDENTS[16:]):
     gold = inc["gold_action_sequence"]
     s = grade_task3(gold[:random.randint(1,len(gold))], inc, {})
-    if not 0.0 <= s <= 1.0:
+    if not 0.0 < s < 1.0:
         R.record(f"Task3 grader range safe (hard {i})", False, f"got {s}")
         break
 else:
-    R.record("Task3 grader always returns [0.0, 1.0]", True, "8 incidents tested")
+    R.record("Task3 grader always returns (0, 1)", True, "8 incidents tested")
 
 # ── Cross-grader range safety (hypothesis-style exhaustive) ───────────────────
 sub("Exhaustive range safety (hypothesis-style)")
@@ -823,10 +828,10 @@ for _ in range(200):
     s2 = grade_task2({"root_cause": random.choice(action_types), "triggered_by": "x", "affected_chain": random.sample(["redis-cache","postgres","payment-api"], k=random.randint(0,3))}, inc, steps_taken=random.randint(1,15))
     seq = random.choices(["inspect_logs:x","restart_service:y","verify_endpoint:z","resolve","wrong"], k=random.randint(0,10))
     s3 = grade_task3(seq, inc, {"destructive_before_diagnose": random.choice([True,False])})
-    if not all(0.0<=s<=1.0 for s in [s1,s2,s3]):
+    if not all(0.0 < s < 1.0 for s in [s1,s2,s3]):
         all_safe = False
         break
-R.record("200 random inputs all return [0.0, 1.0]", all_safe, "hypothesis-style exhaustive test")
+R.record("200 random inputs all return (0, 1)", all_safe, "hypothesis-style exhaustive test")
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  SECTION 5 — REWARD FUNCTION
@@ -1581,7 +1586,7 @@ checklist = [
     ("openenv validate passes", True, "Pydantic models inherit OpenEnv spec correctly"),
     ("Dockerfile builds cleanly", True, "python:3.11-slim + dataset validation on build"),
     ("inference.py runs without error", True, "try/except ensures [END] always printed"),
-    ("3+ tasks with graders scoring [0,1]", all_safe, f"hypothesis: {200} random inputs tested"),
+    ("3+ tasks with graders scoring (0,1)", all_safe, f"hypothesis: {200} random inputs tested"),
     ("stdout: [START][STEP][END] exact format", bool(start_match) and bool(step_match) and bool(end_match), "regex validated"),
     ("Runtime <20min on 2vCPU/8GB", projected_with_llm < 1200, f"~{projected_with_llm:.0f}s projected"),
     ("API_BASE_URL, API_KEY, MODEL_NAME, HF_TOKEN in env vars", True, "evaluator proxy vars + compatibility fallback"),
@@ -1596,7 +1601,7 @@ checklist = [
     ("Red herrings in hard tier", True, f"3 misleading signals per hard incident"),
     ("NetworkX cascade simulation", True, "service_topology as directed graph"),
     ("Dataset fully synthetic", True, "Faker + NetworkX, no real company data"),
-    ("hypothesis tests for grader range", True, "200 random inputs all in [0,1]"),
+    ("hypothesis tests for grader range", True, "200 random inputs all in (0,1)"),
 ]
 
 checklist = [
@@ -1612,7 +1617,7 @@ checklist = [
         "docker build executed" if docker_smoke_executed else "docker unavailable; validated actual Dockerfile structure",
     ),
     ("inference.py runs without error", inference_smoke_ok, "server.app subprocess smoke"),
-    ("3+ tasks with graders scoring [0,1]", all_safe, f"hypothesis: {200} random inputs tested"),
+    ("3+ tasks with graders scoring (0,1)", all_safe, f"hypothesis: {200} random inputs tested"),
     ("stdout: [START][STEP][END] exact format", bool(start_match) and bool(step_match) and bool(end_match), "regex validated"),
     ("Runtime <20min on 2vCPU/8GB", projected_with_llm < 1200, f"~{projected_with_llm:.0f}s projected"),
     ("API_BASE_URL, API_KEY, MODEL_NAME, HF_TOKEN in env vars", True, "os.getenv pattern validated"),
@@ -1627,7 +1632,7 @@ checklist = [
     ("Red herrings in hard tier", True, f"3 misleading signals per hard incident"),
     ("NetworkX cascade simulation", True, "service_topology as directed graph"),
     ("Dataset fully synthetic", True, "Faker + NetworkX, no real company data"),
-    ("hypothesis tests for grader range", True, "200 random inputs all in [0,1]"),
+    ("hypothesis tests for grader range", True, "200 random inputs all in (0,1)"),
 ]
 
 all_pass = True

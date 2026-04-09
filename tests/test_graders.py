@@ -54,7 +54,7 @@ class TestTask1Grader:
             "primary_fault_service": "api-gateway",
         }
         score = grade_task1(submission, incident)
-        assert score == 1.0
+        assert score == 0.99
 
     def test_all_wrong(self):
         incident = _make_incident()
@@ -109,7 +109,7 @@ class TestTask1Grader:
     def test_empty_submission(self):
         incident = _make_incident()
         score = grade_task1({}, incident)
-        assert score == 0.0
+        assert score == 0.01
 
     def test_score_always_in_range(self):
         incident = _make_incident()
@@ -120,7 +120,7 @@ class TestTask1Grader:
                         {"incident_type": itype, "severity": sev, "primary_fault_service": svc},
                         incident,
                     )
-                    assert 0.0 <= score <= 1.0
+                    assert 0.0 < score < 1.0
 
 
 # ─── Task 2 Grader Tests ───────────────────────────────────────────────────────
@@ -179,13 +179,13 @@ class TestTask2Grader:
         score = grade_task2(submission, incident, steps_used=3, action_history=[
             "inspect_logs", "check_metrics", "check_service",
         ])
-        assert 0.0 <= score <= 1.0
+        assert 0.0 < score < 1.0
 
     def test_score_range(self):
         incident = _make_incident()
         submission = {"root_cause": "", "triggered_by": "", "affected_chain": []}
         score = grade_task2(submission, incident, steps_used=1, action_history=["inspect_logs"])
-        assert 0.0 <= score <= 1.0
+        assert 0.0 < score < 1.0
 
 
 # ─── Task 3 Grader Tests ───────────────────────────────────────────────────────
@@ -210,7 +210,7 @@ class TestTask3Grader:
             "episode_done": False,
             "alert_acknowledged": False,
         })
-        assert score == 0.0
+        assert score == 0.01
 
     def test_partial_sequence(self):
         incident = _make_incident()
@@ -273,7 +273,7 @@ class TestGraderRangeSafety:
             "primary_fault_service": service,
         }
         score = grade_task1(submission, incident)
-        assert 0.0 <= score <= 1.0
+        assert 0.0 < score < 1.0
 
     @given(
         steps=st.integers(min_value=0, max_value=20),
@@ -289,7 +289,7 @@ class TestGraderRangeSafety:
             "affected_chain": ["api-gateway"],
         }
         score = grade_task2(submission, incident, steps_used=steps, action_history=actions)
-        assert 0.0 <= score <= 1.0
+        assert 0.0 < score < 1.0
 
     @given(
         num_actions=st.integers(min_value=0, max_value=15),
@@ -311,4 +311,4 @@ class TestGraderRangeSafety:
             "alert_acknowledged": "acknowledge_alert" in actions,
         }
         score = grade_task3(actions, incident, state)
-        assert 0.0 <= score <= 1.0
+        assert 0.0 < score < 1.0

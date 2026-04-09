@@ -15,6 +15,7 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from models import IncidentData
+from tasks.score_utils import open_interval_score
 
 
 def grade_task1(
@@ -32,7 +33,7 @@ def grade_task1(
         incident: The ground-truth incident data.
 
     Returns:
-        Score in [0.0, 1.0].
+        Score in (0, 1), normalized to 0.01..0.99.
     """
     score = 0.0
 
@@ -63,8 +64,7 @@ def grade_task1(
     elif predicted_service in [_normalize(s) for s in incident.gold_affected_chain]:
         score += 0.10  # Partial credit for identifying an affected service
 
-    # Clamp to [0.0, 1.0]
-    return round(max(0.0, min(1.0, score)), 4)
+    return open_interval_score(score)
 
 
 def _normalize(value: str) -> str:

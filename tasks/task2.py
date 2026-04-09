@@ -15,6 +15,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Set
 
 from models import IncidentData
+from tasks.score_utils import open_interval_score
 
 
 MAX_STEPS_TASK2 = 8
@@ -39,7 +40,7 @@ def grade_task2(
         action_history: List of actions taken during the episode.
 
     Returns:
-        Score in [0.0, 1.0].
+        Score in (0, 1), normalized to 0.01..0.99.
     """
     score = 0.0
 
@@ -52,7 +53,7 @@ def grade_task2(
     # ── Diagnostic efficiency (0.30) ──
     score += _grade_efficiency(steps_used, action_history)
 
-    return round(max(0.0, min(1.0, score)), 4)
+    return open_interval_score(score)
 
 
 def _grade_root_cause(

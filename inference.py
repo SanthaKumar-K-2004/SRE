@@ -46,6 +46,8 @@ READINESS_TIMEOUT_SECONDS = 90.0
 READINESS_POLL_SECONDS = 1.0
 HTTP_TIMEOUT = httpx.Timeout(10.0, connect=5.0)
 FAILURE_END_LINE = "[END] success=false steps=0 score=0.00 rewards=0.00"
+OPEN_SCORE_MIN = 0.01
+OPEN_SCORE_MAX = 0.99
 VALID_ACTIONS = {
     "inspect_logs",
     "check_metrics",
@@ -180,6 +182,12 @@ def _coerce_float(value: Any, fallback: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return fallback
+
+
+def _normalize_success_score(score: Any) -> float:
+    """Normalize successful-episode scores to strict-open interval (0,1)."""
+    numeric = _coerce_float(score, OPEN_SCORE_MIN)
+    return round(min(OPEN_SCORE_MAX, max(OPEN_SCORE_MIN, numeric)), 4)
 
 
 def _sanitize_token(value: Any) -> str:
@@ -892,7 +900,7 @@ target_service: {service}
 
             computed_score = sum(step_rewards) / max(1, len(step_rewards))
             raw_final_score = _coerce_float(final_info.get("final_score", computed_score), computed_score)
-            output_score = max(0.0, raw_final_score)
+            output_score = _normalize_success_score(raw_final_score)
             success = output_score > 0.10
             rewards_csv = ",".join(f"{r:.2f}" for r in step_rewards) if step_rewards else "0.00"
 

@@ -277,7 +277,7 @@ Request:
 | `task2` | Medium | `8` | Root cause quality, affected chain quality, step efficiency |
 | `task3` | Hard | `15` | LCS action-sequence match, behavior penalties/bonuses, verification completeness |
 
-All graders return scores in the range `[0.0, 1.0]`.
+All task graders return strict-open scores in `(0, 1)` via deterministic normalization to `0.01..0.99` (to satisfy evaluator task-validation rules).
 
 ## Project Structure
 

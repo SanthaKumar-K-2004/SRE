@@ -23,6 +23,7 @@ from state_machine import IncidentStateMachine, PreconditionError
 from tasks.task1 import grade_task1
 from tasks.task2 import grade_task2
 from tasks.task3 import grade_task3
+from tasks.score_utils import open_interval_score
 
 
 # Max steps per task level
@@ -268,16 +269,18 @@ class SREBenchEnv:
 
     def _compute_final_score(self) -> float:
         """Compute the task-specific final score."""
+        raw_score = 0.0
+
         if self._current_task == TaskType.TASK1:
             # For Task 1, we need the agent's submission
             # In the API flow, this comes from the last step's parameters
             # For now, return cumulative reward as proxy
             submission = self._extract_task1_submission()
-            return grade_task1(submission, self._current_incident)
+            raw_score = grade_task1(submission, self._current_incident)
 
         elif self._current_task == TaskType.TASK2:
             submission = self._extract_task2_submission()
-            return grade_task2(
+            raw_score = grade_task2(
                 submission,
                 self._current_incident,
                 self._state_machine.state.step_count,
@@ -285,13 +288,13 @@ class SREBenchEnv:
             )
 
         elif self._current_task == TaskType.TASK3:
-            return grade_task3(
+            raw_score = grade_task3(
                 self._state_machine.state.action_history,
                 self._current_incident,
                 self._state_machine.get_state_dict(),
             )
 
-        return 0.0
+        return open_interval_score(raw_score)
 
     def _extract_task1_submission(self) -> Dict[str, Any]:
         """

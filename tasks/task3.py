@@ -15,6 +15,7 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 from models import IncidentData
+from tasks.score_utils import open_interval_score
 
 
 MAX_STEPS_TASK3 = 15
@@ -34,7 +35,7 @@ def grade_task3(
         episode_state: Final episode state dictionary.
 
     Returns:
-        Score in [0.0, 1.0].
+        Score in (0, 1), normalized to 0.01..0.99.
     """
     score = 0.0
 
@@ -49,7 +50,7 @@ def grade_task3(
     # ── Verification bonus (0.20) ──
     score += _grade_verification(episode_state)
 
-    return round(max(0.0, min(1.0, score)), 4)
+    return open_interval_score(score)
 
 
 def _grade_sequence_lcs(
