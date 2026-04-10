@@ -103,7 +103,7 @@ tasks:
 
     client = httpx.Client(transport=httpx.MockTransport(handler), timeout=release_check.HTTP_TIMEOUT)
     try:
-        with pytest.raises(RuntimeError, match="at least 3 task entries"):
+        with pytest.raises(RuntimeError, match="at least 3 tasks with graders"):
             release_check.ensure_raw_manifest_has_three_task_graders(
                 client,
                 "https://huggingface.co/spaces/example/raw/main/openenv.yaml",

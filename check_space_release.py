@@ -96,49 +96,66 @@ def _extract_tasks(payload: Any) -> list[dict[str, Any]]:
     return []
 
 
+def _validate_tasks_payload(payload: Any, *, source: str) -> int:
+    tasks = _extract_tasks(payload)
+
+    if len(tasks) < 3:
+        raise RuntimeError(
+            f"{source} does not expose at least 3 tasks with graders. Found {len(tasks)}"
+        )
+
+    invalid = [task.get("id", "<unknown>") for task in tasks if not _grader_reference_is_valid(task.get("grader"))]
+    if invalid:
+        raise RuntimeError(
+            f"{source} returned tasks with invalid grader metadata: " + ", ".join(invalid)
+        )
+
+    return len(tasks)
+
+
 def ensure_raw_manifest_has_three_task_graders(client: httpx.Client, manifest_url: str) -> None:
     """Ensure the deployed manifest advertises >=3 tasks with grader references."""
     response = client.get(manifest_url)
     response.raise_for_status()
     manifest = yaml.safe_load(response.text) or {}
-    tasks = _extract_tasks(manifest)
-
-    if len(tasks) < 3:
-        raise RuntimeError(
-            "Space openenv.yaml does not contain at least 3 task entries. "
-            f"Found {len(tasks)} in {manifest_url}"
-        )
-
-    invalid = [task.get("id", "<unknown>") for task in tasks if not _grader_reference_is_valid(task.get("grader"))]
-    if invalid:
-        raise RuntimeError(
-            "Space openenv.yaml contains tasks with invalid grader metadata: "
-            + ", ".join(invalid)
-        )
-
-    print(f"[PASS] Space openenv.yaml has {len(tasks)} task graders: {manifest_url}")
+    count = _validate_tasks_payload(manifest, source=f"Space openenv.yaml ({manifest_url})")
+    print(f"[PASS] Space openenv.yaml has {count} task graders: {manifest_url}")
 
 
-def ensure_live_tasks_endpoint_has_three_task_graders(client: httpx.Client, tasks_url: str) -> None:
+def ensure_live_tasks_endpoint_has_three_task_graders(
+    client: httpx.Client,
+    tasks_url: str,
+    *,
+    timeout_seconds: float = 0.0,
+    poll_seconds: float = DEFAULT_POLL_SECONDS,
+) -> None:
     """Ensure the deployed API exposes >=3 task entries with grader metadata."""
-    response = client.get(tasks_url)
-    response.raise_for_status()
-    tasks = _extract_tasks(response.json())
+    deadline = time.monotonic() + max(timeout_seconds, 0.0)
+    last_error = "tasks check not started"
 
-    if len(tasks) < 3:
-        raise RuntimeError(
-            "Space /tasks does not expose at least 3 tasks with graders. "
-            f"Found {len(tasks)} in {tasks_url}"
-        )
+    while True:
+        try:
+            response = client.get(tasks_url)
+            response.raise_for_status()
+            count = _validate_tasks_payload(response.json(), source=f"Space /tasks ({tasks_url})")
+            print(f"[PASS] Space /tasks exposes {count} task graders: {tasks_url}")
+            return
+        except Exception as exc:
+            if isinstance(exc, httpx.HTTPStatusError):
+                last_error = f"HTTP {exc.response.status_code}: {_snippet(exc.response)}"
+            else:
+                last_error = f"{exc.__class__.__name__}: {exc}"
 
-    invalid = [task.get("id", "<unknown>") for task in tasks if not _grader_reference_is_valid(task.get("grader"))]
-    if invalid:
-        raise RuntimeError(
-            "Space /tasks returned tasks with invalid grader metadata: "
-            + ", ".join(invalid)
-        )
+        if timeout_seconds <= 0 or time.monotonic() >= deadline:
+            break
 
-    print(f"[PASS] Space /tasks exposes {len(tasks)} task graders: {tasks_url}")
+        print(f"[WAIT] Space /tasks not ready yet: {last_error}")
+        time.sleep(poll_seconds)
+
+    raise RuntimeError(
+        f"Space /tasks never exposed 3 valid task graders within {timeout_seconds:.0f}s. "
+        f"Last error: {last_error}"
+    )
 
 
 def run_remote_smoke(
@@ -222,7 +239,12 @@ def main() -> int:
         )
         ensure_raw_inference_is_hardened(client, args.raw_url)
         ensure_raw_manifest_has_three_task_graders(client, args.manifest_url)
-        ensure_live_tasks_endpoint_has_three_task_graders(client, tasks_url)
+        ensure_live_tasks_endpoint_has_three_task_graders(
+            client,
+            tasks_url,
+            timeout_seconds=args.health_timeout,
+            poll_seconds=args.poll_seconds,
+        )
 
     run_remote_smoke(
         python_executable=sys.executable,
