@@ -51,6 +51,7 @@ def test_manifest_entrypoint_exposes_three_tasks_with_graders():
         assert len(tasks) >= 3
         assert {"task1", "task2", "task3"}.issubset({task.get("id") for task in tasks})
         assert all("grader" in task for task in tasks[:3])
+        assert all(task["grader"]["module"] == "tasks.manifest_graders" for task in tasks[:3])
     finally:
         env.close()
 

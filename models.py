@@ -192,3 +192,22 @@ class HealthResponse(BaseModel):
     """Response for GET /health."""
 
     status: str = "ok"
+
+
+class TaskGraderSpec(BaseModel):
+    """Import metadata for a task grader."""
+
+    module: str
+    function: str
+    ref: Optional[str] = None
+
+
+class TaskDescriptor(BaseModel):
+    """Published task metadata for validators and clients."""
+
+    id: str
+    name: Optional[str] = None
+    description: Optional[str] = None
+    difficulty: str
+    max_steps: Optional[int] = None
+    grader: TaskGraderSpec

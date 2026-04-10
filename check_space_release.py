@@ -5,13 +5,14 @@ from __future__ import annotations
 
 import argparse
 import os
-import re
 import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 import httpx
+import yaml
 
 
 REPO_ROOT = Path(__file__).resolve().parent
@@ -75,32 +76,69 @@ def ensure_raw_inference_is_hardened(client: httpx.Client, raw_url: str) -> None
     print(f"[PASS] Space raw inference.py is hardened: {raw_url}")
 
 
+def _grader_reference_is_valid(value: Any) -> bool:
+    if isinstance(value, str):
+        return ":" in value
+    if isinstance(value, dict):
+        module = value.get("module")
+        function = value.get("function")
+        return isinstance(module, str) and bool(module) and isinstance(function, str) and bool(function)
+    return False
+
+
+def _extract_tasks(payload: Any) -> list[dict[str, Any]]:
+    if isinstance(payload, list):
+        return [task for task in payload if isinstance(task, dict)]
+    if isinstance(payload, dict):
+        tasks = payload.get("tasks")
+        if isinstance(tasks, list):
+            return [task for task in tasks if isinstance(task, dict)]
+    return []
+
+
 def ensure_raw_manifest_has_three_task_graders(client: httpx.Client, manifest_url: str) -> None:
     """Ensure the deployed manifest advertises >=3 tasks with grader references."""
     response = client.get(manifest_url)
     response.raise_for_status()
-    content = response.text
+    manifest = yaml.safe_load(response.text) or {}
+    tasks = _extract_tasks(manifest)
 
-    grader_values = []
-    for line in content.splitlines():
-        match = re.match(r"^\s*grader:\s*(.+?)\s*$", line)
-        if match:
-            grader_values.append(match.group(1).strip().strip('"').strip("'"))
-
-    if len(grader_values) < 3:
+    if len(tasks) < 3:
         raise RuntimeError(
-            "Space openenv.yaml does not contain at least 3 grader declarations. "
-            f"Found {len(grader_values)} in {manifest_url}"
+            "Space openenv.yaml does not contain at least 3 task entries. "
+            f"Found {len(tasks)} in {manifest_url}"
         )
 
-    invalid = [value for value in grader_values if ":" not in value]
+    invalid = [task.get("id", "<unknown>") for task in tasks if not _grader_reference_is_valid(task.get("grader"))]
     if invalid:
         raise RuntimeError(
-            "Space openenv.yaml contains grader references missing module:function format: "
+            "Space openenv.yaml contains tasks with invalid grader metadata: "
             + ", ".join(invalid)
         )
 
-    print(f"[PASS] Space openenv.yaml has {len(grader_values)} task graders: {manifest_url}")
+    print(f"[PASS] Space openenv.yaml has {len(tasks)} task graders: {manifest_url}")
+
+
+def ensure_live_tasks_endpoint_has_three_task_graders(client: httpx.Client, tasks_url: str) -> None:
+    """Ensure the deployed API exposes >=3 task entries with grader metadata."""
+    response = client.get(tasks_url)
+    response.raise_for_status()
+    tasks = _extract_tasks(response.json())
+
+    if len(tasks) < 3:
+        raise RuntimeError(
+            "Space /tasks does not expose at least 3 tasks with graders. "
+            f"Found {len(tasks)} in {tasks_url}"
+        )
+
+    invalid = [task.get("id", "<unknown>") for task in tasks if not _grader_reference_is_valid(task.get("grader"))]
+    if invalid:
+        raise RuntimeError(
+            "Space /tasks returned tasks with invalid grader metadata: "
+            + ", ".join(invalid)
+        )
+
+    print(f"[PASS] Space /tasks exposes {len(tasks)} task graders: {tasks_url}")
 
 
 def run_remote_smoke(
@@ -173,6 +211,7 @@ def _parse_args() -> argparse.Namespace:
 def main() -> int:
     args = _parse_args()
     health_url = f"{args.space_url.rstrip('/')}/health"
+    tasks_url = f"{args.space_url.rstrip('/')}/tasks"
 
     with httpx.Client(timeout=HTTP_TIMEOUT, follow_redirects=True) as client:
         wait_for_space_health(
@@ -183,6 +222,7 @@ def main() -> int:
         )
         ensure_raw_inference_is_hardened(client, args.raw_url)
         ensure_raw_manifest_has_three_task_graders(client, args.manifest_url)
+        ensure_live_tasks_endpoint_has_three_task_graders(client, tasks_url)
 
     run_remote_smoke(
         python_executable=sys.executable,

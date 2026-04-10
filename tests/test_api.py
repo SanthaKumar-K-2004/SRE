@@ -78,6 +78,7 @@ class TestRootEndpoint:
         data = response.json()
         assert data["status"] == "ok"
         assert data["docs"] == "/docs"
+        assert data["tasks"] == "/tasks"
 
 class TestHealthEndpoint:
     def test_health_returns_200(self, client):
@@ -258,6 +259,21 @@ class TestStateEndpoint:
         client.post("/reset", json={"task": "task1", "seed": 0})
 
 
+class TestTasksEndpoint:
+    def test_tasks_returns_200(self, client):
+        response = client.get("/tasks")
+        assert response.status_code == 200
+
+    def test_tasks_returns_three_tasks_with_graders(self, client):
+        response = client.get("/tasks")
+        data = response.json()
+        assert isinstance(data, list)
+        assert len(data) >= 3
+        assert {"task1", "task2", "task3"}.issubset({task["id"] for task in data})
+        assert data[0]["grader"]["module"] == "tasks.manifest_graders"
+        assert "function" in data[0]["grader"]
+
+
 class TestOpenAPIDocs:
     def test_docs_available(self, client):
         response = client.get("/docs")
@@ -272,3 +288,4 @@ class TestOpenAPIDocs:
         assert "/step" in schema["paths"]
         assert "/state" in schema["paths"]
         assert "/health" in schema["paths"]
+        assert "/tasks" in schema["paths"]

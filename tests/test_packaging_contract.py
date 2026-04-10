@@ -43,9 +43,13 @@ def test_openenv_manifest_contains_entrypoint_models_and_graders() -> None:
     assert models.get("reward") == "models.SREReward"
 
     task_map = {task.get("id"): task for task in manifest.get("tasks", [])}
-    assert task_map["task1"]["grader"] == "tasks.manifest_graders:grade_task1_manifest"
-    assert task_map["task2"]["grader"] == "tasks.manifest_graders:grade_task2_manifest"
-    assert task_map["task3"]["grader"] == "tasks.manifest_graders:grade_task3_manifest"
+    assert task_map["task1"]["grader"]["module"] == "tasks.manifest_graders"
+    assert task_map["task1"]["grader"]["function"] == "grade_task1_manifest"
+    assert task_map["task2"]["grader"]["module"] == "tasks.manifest_graders"
+    assert task_map["task2"]["grader"]["function"] == "grade_task2_manifest"
+    assert task_map["task3"]["grader"]["module"] == "tasks.manifest_graders"
+    assert task_map["task3"]["grader"]["function"] == "grade_task3_manifest"
+    assert manifest.get("api", {}).get("tasks", {}).get("path") == "/tasks"
 
 
 def test_manifest_has_three_importable_task_graders() -> None:
@@ -58,10 +62,11 @@ def test_manifest_has_three_importable_task_graders() -> None:
     importable = 0
     for task in tasks:
         grader_ref = task.get("grader")
-        assert isinstance(grader_ref, str)
-        assert ":" in grader_ref
-
-        module_name, function_name = grader_ref.split(":", 1)
+        assert isinstance(grader_ref, dict)
+        module_name = grader_ref.get("module")
+        function_name = grader_ref.get("function")
+        assert isinstance(module_name, str)
+        assert isinstance(function_name, str)
         module = importlib.import_module(module_name)
         assert hasattr(module, function_name)
         assert callable(getattr(module, function_name))

@@ -223,8 +223,9 @@ What `validate-submission.sh` enforces:
 2. Confirms `origin/main` and Space `main` point to the same commit.
 3. Waits for Space `/health` to return `200 {"status":"ok"}`.
 4. Confirms remote `inference.py` no longer contains stale `raise_for_status(`.
-5. Confirms remote `openenv.yaml` advertises at least 3 tasks with module:function grader references.
-6. Runs `python inference.py --task task1 --seed 42 --quiet --url https://santhakumar-k-2004-sre-bench.hf.space`.
+5. Confirms remote `openenv.yaml` advertises at least 3 tasks with valid grader metadata.
+6. Confirms live `GET /tasks` exposes at least 3 tasks with grader bindings.
+7. Runs `python inference.py --task task1 --seed 42 --quiet --url https://santhakumar-k-2004-sre-bench.hf.space`.
 
 Troubleshooting note:
 
@@ -238,6 +239,7 @@ Troubleshooting note:
 | `POST` | `/reset` | Start a new episode |
 | `POST` | `/step` | Execute one action |
 | `GET` | `/state` | Get current environment state |
+| `GET` | `/tasks` | List task metadata and grader bindings |
 | `GET` | `/docs` | Swagger UI |
 
 ### `POST /reset`

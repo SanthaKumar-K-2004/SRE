@@ -17,8 +17,15 @@ from typing import Any, Dict, Optional
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from environment import SREBenchEnv
-from models import HealthResponse, ResetRequest, SREAction, SREObservation, SREReward
+from environment import SREBenchEnv, get_task_catalog
+from models import (
+    HealthResponse,
+    ResetRequest,
+    SREAction,
+    SREObservation,
+    SREReward,
+    TaskDescriptor,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -97,6 +104,7 @@ async def root() -> Dict[str, Any]:
         "version": app.version,
         "docs": "/docs",
         "health": "/health",
+        "tasks": "/tasks",
         "openapi": "/openapi.json",
     }
 
@@ -106,6 +114,12 @@ async def health_check() -> HealthResponse:
     """Health check endpoint required by deployment validators."""
     get_env()
     return HealthResponse(status="ok")
+
+
+@app.get("/tasks", response_model=list[TaskDescriptor], tags=["Environment"])
+async def list_tasks() -> list[TaskDescriptor]:
+    """Expose published task metadata for validators that enumerate tasks over HTTP."""
+    return [TaskDescriptor.model_validate(task) for task in get_task_catalog()]
 
 
 @app.post("/reset", response_model=SREObservation, tags=["Environment"])

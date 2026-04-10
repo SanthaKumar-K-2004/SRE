@@ -5,6 +5,7 @@ OpenEnv-compliant RL environment for SRE incident response training.
 
 from __future__ import annotations
 
+import copy
 import json
 import random
 from pathlib import Path
@@ -32,6 +33,48 @@ MAX_STEPS = {
     TaskType.TASK2: 8,
     TaskType.TASK3: 15,
 }
+
+
+def _grader_spec(function_name: str) -> Dict[str, str]:
+    """Return a validator-friendly grader reference payload."""
+    return {
+        "module": "tasks.manifest_graders",
+        "function": function_name,
+        "ref": f"tasks.manifest_graders:{function_name}",
+    }
+
+
+OPENENV_TASKS: List[Dict[str, Any]] = [
+    {
+        "id": "task1",
+        "name": "Alert Classification",
+        "description": "Classify incident type, severity, and primary faulty service.",
+        "difficulty": "easy",
+        "max_steps": 1,
+        "grader": _grader_spec("grade_task1_manifest"),
+    },
+    {
+        "id": "task2",
+        "name": "Root Cause Analysis",
+        "description": "Identify likely root cause, trigger service, and affected chain.",
+        "difficulty": "medium",
+        "max_steps": 8,
+        "grader": _grader_spec("grade_task2_manifest"),
+    },
+    {
+        "id": "task3",
+        "name": "Full Remediation",
+        "description": "Execute diagnose-remediate-verify-resolve sequence.",
+        "difficulty": "hard",
+        "max_steps": 15,
+        "grader": _grader_spec("grade_task3_manifest"),
+    },
+]
+
+
+def get_task_catalog() -> List[Dict[str, Any]]:
+    """Return a deep copy of the published task catalog."""
+    return copy.deepcopy(OPENENV_TASKS)
 
 
 class SREBenchEnv:
@@ -348,23 +391,7 @@ class SREBenchOpenEnv:
     """
 
     task_ids = ["task1", "task2", "task3"]
-    tasks = [
-        {
-            "id": "task1",
-            "difficulty": "easy",
-            "grader": "tasks.manifest_graders:grade_task1_manifest",
-        },
-        {
-            "id": "task2",
-            "difficulty": "medium",
-            "grader": "tasks.manifest_graders:grade_task2_manifest",
-        },
-        {
-            "id": "task3",
-            "difficulty": "hard",
-            "grader": "tasks.manifest_graders:grade_task3_manifest",
-        },
-    ]
+    tasks = get_task_catalog()
 
     def __init__(self, data_path: Optional[str] = None):
         self._env = SREBenchEnv(data_path=data_path)
@@ -396,9 +423,9 @@ class SREBenchOpenEnv:
         """Return raw dict state from the wrapped environment."""
         return self._env.state()
 
-    def list_tasks(self) -> List[Dict[str, str]]:
+    def list_tasks(self) -> List[Dict[str, Any]]:
         """Return task metadata for validators that inspect runtime task registries."""
-        return [task.copy() for task in self.tasks]
+        return get_task_catalog()
 
     def close(self) -> None:
         """Release resources held by the wrapped environment."""

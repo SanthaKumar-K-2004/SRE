@@ -59,11 +59,17 @@ def test_ensure_raw_manifest_has_three_task_graders_accepts_valid_manifest() -> 
 name: sre-bench
 tasks:
   - id: task1
-    grader: tasks.manifest_graders:grade_task1_manifest
+    grader:
+      module: tasks.manifest_graders
+      function: grade_task1_manifest
   - id: task2
-    grader: tasks.manifest_graders:grade_task2_manifest
+    grader:
+      module: tasks.manifest_graders
+      function: grade_task2_manifest
   - id: task3
-    grader: tasks.manifest_graders:grade_task3_manifest
+    grader:
+      module: tasks.manifest_graders
+      function: grade_task3_manifest
 """
 
     def handler(_request: httpx.Request) -> httpx.Response:
@@ -84,9 +90,12 @@ def test_ensure_raw_manifest_has_three_task_graders_rejects_bad_manifest() -> No
 name: sre-bench
 tasks:
   - id: task1
-    grader: tasks.manifest_graders.grade_task1_manifest
+    grader:
+      module: tasks.manifest_graders
+      function: grade_task1_manifest
   - id: task2
-    grader: tasks.manifest_graders.grade_task2_manifest
+    grader:
+      module: tasks.manifest_graders
 """
 
     def handler(_request: httpx.Request) -> httpx.Response:
@@ -94,10 +103,47 @@ tasks:
 
     client = httpx.Client(transport=httpx.MockTransport(handler), timeout=release_check.HTTP_TIMEOUT)
     try:
-        with pytest.raises(RuntimeError, match="at least 3 grader declarations"):
+        with pytest.raises(RuntimeError, match="at least 3 task entries"):
             release_check.ensure_raw_manifest_has_three_task_graders(
                 client,
                 "https://huggingface.co/spaces/example/raw/main/openenv.yaml",
+            )
+    finally:
+        client.close()
+
+
+def test_ensure_live_tasks_endpoint_has_three_task_graders_accepts_valid_payload() -> None:
+    payload = [
+        {"id": "task1", "grader": {"module": "tasks.manifest_graders", "function": "grade_task1_manifest"}},
+        {"id": "task2", "grader": {"module": "tasks.manifest_graders", "function": "grade_task2_manifest"}},
+        {"id": "task3", "grader": {"module": "tasks.manifest_graders", "function": "grade_task3_manifest"}},
+    ]
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=payload)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), timeout=release_check.HTTP_TIMEOUT)
+    try:
+        release_check.ensure_live_tasks_endpoint_has_three_task_graders(
+            client,
+            "https://example-space.hf.space/tasks",
+        )
+    finally:
+        client.close()
+
+
+def test_ensure_live_tasks_endpoint_has_three_task_graders_rejects_bad_payload() -> None:
+    payload = {"tasks": [{"id": "task1", "grader": {"module": "tasks.manifest_graders"}}]}
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=payload)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), timeout=release_check.HTTP_TIMEOUT)
+    try:
+        with pytest.raises(RuntimeError, match="at least 3 tasks with graders"):
+            release_check.ensure_live_tasks_endpoint_has_three_task_graders(
+                client,
+                "https://example-space.hf.space/tasks",
             )
     finally:
         client.close()
