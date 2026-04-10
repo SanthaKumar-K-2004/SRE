@@ -177,7 +177,7 @@ PowerShell equivalent:
 .\validate-submission.ps1
 ```
 
-This final guard expects GitHub `main` and Hugging Face Space `main` to already be in sync.
+Run this final guard after the `sync-space` workflow succeeds and before clicking `Update submission`.
 
 ## GitHub to Hugging Face Sync
 
@@ -192,19 +192,22 @@ Required repository secret (one of the following):
 - `HF_SPACE_WRITE_TOKEN` (preferred): Hugging Face token with write access to `santhakumar-k-2004/sre-bench`.
 - `HF_TOKEN` (fallback): same write access; used only when `HF_SPACE_WRITE_TOKEN` is not configured.
 
-If neither secret is configured, the workflow still runs validation but skips Space sync and emits a warning.
+Default behavior:
 
-Optional strict mode:
+- The workflow is strict by default and fails if neither `HF_SPACE_WRITE_TOKEN` nor `HF_TOKEN` is configured.
+- This prevents GitHub `main` from drifting ahead of the deployed Space artifact used by submission validation.
 
-- Set repository variable `REQUIRE_SPACE_SYNC=true` to fail the workflow when neither token secret is configured.
-- Leave it unset (or set to `false`) to keep default non-blocking validation mode.
+Explicit opt-out for local experimentation only:
+
+- Set repository variable `REQUIRE_SPACE_SYNC=false` only if you intentionally want warning-only behavior and are not preparing a submission.
+- Leaving `REQUIRE_SPACE_SYNC` unset keeps strict sync enforcement enabled.
 
 Submission flow (recommended):
 
 1. Run local gates: `pytest -q`, `python verify_sre_bench.py --gate phase1`, `python verify_sre_bench.py --gate phase2`, `python verify_sre_bench.py`.
 2. `git push origin main`
 3. Wait for GitHub Actions job `sync-space` to succeed.
-4. Run `bash validate-submission.sh` (Linux/macOS) or `.\validate-submission.ps1` (PowerShell)
+4. Run `bash validate-submission.sh` (Linux/macOS) or `.\validate-submission.ps1` (PowerShell). This step is required before `Update submission`.
 5. Confirm the live Space is healthy at `https://santhakumar-k-2004-sre-bench.hf.space/health`.
 6. Confirm the raw Space code is updated at `https://huggingface.co/spaces/santhakumar-k-2004/sre-bench/raw/main/inference.py`.
 7. Let the team lead click `Update submission`.
@@ -220,7 +223,8 @@ What `validate-submission.sh` enforces:
 2. Confirms `origin/main` and Space `main` point to the same commit.
 3. Waits for Space `/health` to return `200 {"status":"ok"}`.
 4. Confirms remote `inference.py` no longer contains stale `raise_for_status(`.
-5. Runs `python inference.py --task task1 --seed 42 --quiet --url https://santhakumar-k-2004-sre-bench.hf.space`.
+5. Confirms remote `openenv.yaml` advertises at least 3 tasks with module:function grader references.
+6. Runs `python inference.py --task task1 --seed 42 --quiet --url https://santhakumar-k-2004-sre-bench.hf.space`.
 
 Troubleshooting note:
 

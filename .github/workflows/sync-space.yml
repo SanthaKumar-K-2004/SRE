@@ -51,8 +51,9 @@ jobs:
           set -euo pipefail
           token=""
           source_name=""
-          strict_mode="$(printf '%s' "${REQUIRE_SPACE_SYNC:-false}" | tr '[:upper:]' '[:lower:]')"
-          if [ -z "${strict_mode}" ]; then
+          strict_mode_raw="$(printf '%s' "${REQUIRE_SPACE_SYNC:-}" | tr '[:upper:]' '[:lower:]')"
+          strict_mode="true"
+          if [ "${strict_mode_raw}" = "false" ]; then
             strict_mode="false"
           fi
 
@@ -67,12 +68,12 @@ jobs:
           if [ -z "${token}" ]; then
             if [ "${strict_mode}" = "true" ]; then
               echo "SYNC_ENABLED=false" >> "${GITHUB_ENV}"
-              echo "::error::REQUIRE_SPACE_SYNC=true but no Hugging Face write token is configured. Set HF_SPACE_WRITE_TOKEN (preferred) or HF_TOKEN."
+              echo "::error::Space sync is required by default but no Hugging Face write token is configured. Set HF_SPACE_WRITE_TOKEN (preferred) or HF_TOKEN, or explicitly set REQUIRE_SPACE_SYNC=false to opt out."
               exit 1
             fi
 
             echo "SYNC_ENABLED=false" >> "${GITHUB_ENV}"
-            echo "::warning::Missing Hugging Face write token. Set HF_SPACE_WRITE_TOKEN (preferred) or HF_TOKEN to enable automatic Space sync."
+            echo "::warning::Missing Hugging Face write token. Automatic Space sync is disabled because REQUIRE_SPACE_SYNC=false was set explicitly."
             exit 0
           fi
 
