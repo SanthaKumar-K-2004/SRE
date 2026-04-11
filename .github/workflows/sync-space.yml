@@ -96,7 +96,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git remote remove hf-space 2>/dev/null || true
-          git remote add hf-space "https://x-access-token:${HF_SYNC_TOKEN}@huggingface.co/spaces/santhakumar-k-2004/sre-bench"
+          # Hugging Face git endpoints expect username:token style credentials.
+          git remote add hf-space "https://santhakumar-k-2004:${HF_SYNC_TOKEN}@huggingface.co/spaces/santhakumar-k-2004/sre-bench"
           git fetch hf-space main || true
 
           expected=""
@@ -104,10 +105,21 @@ jobs:
             expected="$(git rev-parse refs/remotes/hf-space/main)"
           fi
 
+          push_ok="false"
           if [ -n "$expected" ]; then
-            git push --force-with-lease=refs/heads/main:${expected} hf-space HEAD:main
+            git push --force-with-lease=refs/heads/main:${expected} hf-space HEAD:main && push_ok="true" || true
           else
-            git push hf-space HEAD:main
+            git push hf-space HEAD:main && push_ok="true" || true
+          fi
+
+          # Fallback auth pattern for environments where HF requires a generic user field.
+          if [ "$push_ok" != "true" ]; then
+            git remote set-url hf-space "https://user:${HF_SYNC_TOKEN}@huggingface.co/spaces/santhakumar-k-2004/sre-bench"
+            if [ -n "$expected" ]; then
+              git push --force-with-lease=refs/heads/main:${expected} hf-space HEAD:main
+            else
+              git push hf-space HEAD:main
+            fi
           fi
 
       - name: Verify live Space release readiness
