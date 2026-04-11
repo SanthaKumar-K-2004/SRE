@@ -270,8 +270,12 @@ class TestTasksEndpoint:
         assert isinstance(data, list)
         assert len(data) >= 3
         assert {"task1", "task2", "task3"}.issubset({task["id"] for task in data})
-        assert data[0]["grader"]["module"] == "tasks.manifest_graders"
-        assert "function" in data[0]["grader"]
+        first_grader = data[0]["grader"]
+        if isinstance(first_grader, str):
+            assert first_grader.startswith("tasks.manifest_graders:")
+        else:
+            assert first_grader["module"] == "tasks.manifest_graders"
+            assert "function" in first_grader
 
 
 class TestOpenAPIDocs:

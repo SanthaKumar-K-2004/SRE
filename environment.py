@@ -35,13 +35,9 @@ MAX_STEPS = {
 }
 
 
-def _grader_spec(function_name: str) -> Dict[str, str]:
-    """Return a validator-friendly grader reference payload."""
-    return {
-        "module": "tasks.manifest_graders",
-        "function": function_name,
-        "ref": f"tasks.manifest_graders:{function_name}",
-    }
+def _grader_spec(function_name: str) -> str:
+    """Return grader reference in module:function format for broad validator compatibility."""
+    return f"tasks.manifest_graders:{function_name}"
 
 
 OPENENV_TASKS: List[Dict[str, Any]] = [

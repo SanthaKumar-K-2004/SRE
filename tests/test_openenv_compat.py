@@ -13,6 +13,14 @@ from models import ActionType, SREAction, SREObservation, SREReward
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
+def _is_valid_grader_ref(value: object) -> bool:
+    if isinstance(value, str):
+        return value.startswith("tasks.manifest_graders:")
+    if isinstance(value, dict):
+        return value.get("module") == "tasks.manifest_graders" and bool(value.get("function"))
+    return False
+
+
 def _load_manifest_entrypoint_class():
     manifest = yaml.safe_load((REPO_ROOT / "openenv.yaml").read_text(encoding="utf-8"))
     entrypoint = manifest["entrypoint"]
@@ -51,7 +59,7 @@ def test_manifest_entrypoint_exposes_three_tasks_with_graders():
         assert len(tasks) >= 3
         assert {"task1", "task2", "task3"}.issubset({task.get("id") for task in tasks})
         assert all("grader" in task for task in tasks[:3])
-        assert all(task["grader"]["module"] == "tasks.manifest_graders" for task in tasks[:3])
+        assert all(_is_valid_grader_ref(task["grader"]) for task in tasks[:3])
     finally:
         env.close()
 

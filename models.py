@@ -210,4 +210,4 @@ class TaskDescriptor(BaseModel):
     description: Optional[str] = None
     difficulty: str
     max_steps: Optional[int] = None
-    grader: TaskGraderSpec
+    grader: str | TaskGraderSpec
