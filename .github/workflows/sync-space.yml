@@ -118,8 +118,8 @@ jobs:
           git remote add hf-space "${selected_url}"
           git fetch hf-space main || true
 
-          # Keep Space main aligned with GitHub main even if histories diverge.
-          git push --force hf-space HEAD:main
+          # Keep Space main aligned with GitHub main using a standard fast-forward push.
+          git push hf-space HEAD:main
 
       - name: Verify live Space release readiness
         if: env.SYNC_ENABLED == 'true'
