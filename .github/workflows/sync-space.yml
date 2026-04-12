@@ -96,34 +96,30 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git remote remove hf-space 2>/dev/null || true
-          # Hugging Face git endpoints expect username:token style credentials.
-          git remote add hf-space "https://santhakumar-k-2004:${HF_SYNC_TOKEN}@huggingface.co/spaces/santhakumar-k-2004/sre-bench"
+          repo_path="spaces/santhakumar-k-2004/sre-bench"
+          base_host="huggingface.co"
+          selected_url=""
+
+          for candidate in \
+            "https://santhakumar-k-2004:${HF_SYNC_TOKEN}@${base_host}/${repo_path}" \
+            "https://user:${HF_SYNC_TOKEN}@${base_host}/${repo_path}" \
+            "https://x-access-token:${HF_SYNC_TOKEN}@${base_host}/${repo_path}"; do
+            if git ls-remote "${candidate}" >/dev/null 2>&1; then
+              selected_url="${candidate}"
+              break
+            fi
+          done
+
+          if [ -z "${selected_url}" ]; then
+            echo "::error::Unable to authenticate to Hugging Face Space git remote with the configured token."
+            exit 1
+          fi
+
+          git remote add hf-space "${selected_url}"
           git fetch hf-space main || true
 
-          expected=""
-          if git rev-parse --verify refs/remotes/hf-space/main >/dev/null 2>&1; then
-            expected="$(git rev-parse refs/remotes/hf-space/main)"
-          fi
-
-          push_ok="false"
-          if git push hf-space HEAD:main; then
-            push_ok="true"
-          fi
-
-          # Fallback auth pattern for environments where HF requires a generic user field.
-          if [ "$push_ok" != "true" ]; then
-            git remote set-url hf-space "https://user:${HF_SYNC_TOKEN}@huggingface.co/spaces/santhakumar-k-2004/sre-bench"
-            if git push hf-space HEAD:main; then
-              push_ok="true"
-            fi
-          fi
-
-          if [ "$push_ok" != "true" ]; then
-            echo "SYNC_PUSH_FAILED=true" >> "${GITHUB_ENV}"
-            echo "::warning::Unable to push to Hugging Face Space from workflow (git exit 128/permission issue). Live validation will still run against current Space state."
-          else
-            echo "SYNC_PUSH_FAILED=false" >> "${GITHUB_ENV}"
-          fi
+          # Keep Space main aligned with GitHub main even if histories diverge.
+          git push --force hf-space HEAD:main
 
       - name: Verify live Space release readiness
         if: env.SYNC_ENABLED == 'true'
