@@ -96,26 +96,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git remote remove hf-space 2>/dev/null || true
-          repo_path="spaces/santhakumar-k-2004/sre-bench"
-          base_host="huggingface.co"
-          selected_url=""
-
-          for candidate in \
-            "https://santhakumar-k-2004:${HF_SYNC_TOKEN}@${base_host}/${repo_path}" \
-            "https://user:${HF_SYNC_TOKEN}@${base_host}/${repo_path}" \
-            "https://x-access-token:${HF_SYNC_TOKEN}@${base_host}/${repo_path}"; do
-            if git ls-remote "${candidate}" >/dev/null 2>&1; then
-              selected_url="${candidate}"
-              break
-            fi
-          done
-
-          if [ -z "${selected_url}" ]; then
-            echo "::error::Unable to authenticate to Hugging Face Space git remote with the configured token."
-            exit 1
-          fi
-
-          git remote add hf-space "${selected_url}"
+          git remote add hf-space "https://santhakumar-k-2004:${HF_SYNC_TOKEN}@huggingface.co/spaces/santhakumar-k-2004/sre-bench"
           git fetch hf-space main || true
 
           # Keep Space main aligned with GitHub main using a standard fast-forward push.
